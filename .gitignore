@@ -31,7 +31,7 @@ Thumbs.db
 *.env
 application-*.yml
 application-*.yaml
-application-*.properties
+application-prod.properties
 .secret/
 *.key
 *.pem
