@@ -1,0 +1,42 @@
+### IntelliJ IDEA ###
+.idea/
+*.iml
+out/
+*.ipr
+*.iws
+
+### Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### Logs ###
+logs/
+*.log
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Java ###
+*.class
+
+### Spring Boot ###
+/bin/
+/target/
+
+### Environment / Credentials ###
+*.env
+application-*.yml
+application-*.yaml
+application-*.properties
+.secret/
+*.key
+*.pem
+
+### Others ###
+/tmp/
+*.swp
+.env
