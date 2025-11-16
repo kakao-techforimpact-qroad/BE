@@ -32,7 +32,7 @@ public class PolicyEntity extends BaseTimeEntity {
     private String ministerName;
 
     @Column(name = "original_url", nullable = false, length = 255)
-    private String originalUrl;
+    private String link;
 
     @Column(name = "registration_date")
     private ZonedDateTime registrationDate;

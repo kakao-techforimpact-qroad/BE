@@ -23,6 +23,9 @@ public class ArticleEntity extends BaseTimeEntity {
     private String title;
 
     @Column(columnDefinition = "TEXT")
+    private String content;
+
+    @Column(columnDefinition = "TEXT")
     private String summary;
 
     @Column(nullable = false, columnDefinition = "TEXT")

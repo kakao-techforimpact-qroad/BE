@@ -17,5 +17,22 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     @Query("SELECT new com.qroad.be.domain.article.ArticleSimpleDTO(a.id, a.title) " +
             "FROM ArticleEntity a WHERE a.paper.id = :paperId")
     List<ArticleSimpleDTO> findArticlesByPaperId(@Param("paperId") Long paperId);
+
+    @Query("""
+    SELECT new com.qroad.be.domain.article.ArticlesDetailDTO(
+        a.id,
+        a.title,
+        ad.pressCompany,
+        a.reporter,
+        p.publishedDate,
+        a.summary
+    )
+    FROM ArticleEntity a
+    JOIN a.paper p
+    JOIN a.admin ad
+    WHERE a.id = :id
+    """)
+    ArticlesDetailDTO findArticleDetailById(@Param("id") Long id);
+
 }
 
