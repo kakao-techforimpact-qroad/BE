@@ -28,8 +28,8 @@ public class PolicyEntity extends BaseTimeEntity {
     @Column(columnDefinition = "TEXT")
     private String content;
 
-    @Column(name = "minister_code", length = 100)
-    private String ministerCode;
+    @Column(name = "minister_name", length = 100)
+    private String ministerName;
 
     @Column(name = "original_url", nullable = false, length = 255)
     private String originalUrl;

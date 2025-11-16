@@ -8,6 +8,6 @@ import java.util.List;
 @Repository
 public interface PolicyRepository extends JpaRepository<PolicyEntity, Long> {
     List<PolicyEntity> findByStatus(String status);
-    List<PolicyEntity> findByMinisterCode(String ministerCode);
+    List<PolicyEntity> findByMinisterName(String ministerName);
 }
 
