@@ -1,6 +1,8 @@
 package com.qroad.be.domain.qrcode;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -12,5 +14,8 @@ public interface QrCodeRepository extends JpaRepository<QrCodeEntity, Long> {
     List<QrCodeEntity> findByStatus(String status);
     List<QrCodeEntity> findByPaperId(Long paperId);
     List<QrCodeEntity> findByAdminId(Long adminId);
+
+    @Query("SELECT q.paper.id FROM QrCodeEntity q WHERE q.qrKey = :qrKey")
+    Long findPaperIdByQrKey(@Param("qrKey") String qrKey);
 }
 
