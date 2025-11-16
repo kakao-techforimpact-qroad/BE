@@ -23,8 +23,8 @@ public class AdminEntity extends BaseTimeEntity {
     @Column(nullable = false, length = 255)
     private String password;
 
-    @Column(name = "press_companies", length = 100)
-    private String pressCompanies;
+    @Column(name = "press_company", length = 100)
+    private String pressCompany;
 
     @Column(nullable = false, length = 10)
     @Builder.Default
