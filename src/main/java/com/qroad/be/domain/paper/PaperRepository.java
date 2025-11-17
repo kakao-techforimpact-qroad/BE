@@ -1,5 +1,10 @@
 package com.qroad.be.domain.paper;
 
+//2025.11.17. - kimyushin (PaperRepository 수정)
+//Page<PaperEntity>: 페이징 결과 반환
+//Pageable pageable: 페이지 번호, 크기 정보
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -18,5 +23,7 @@ public interface PaperRepository extends JpaRepository<PaperEntity, Long> {
 
     @Query("SELECT p.publishedDate FROM PaperEntity p WHERE p.id = :paperId")
     LocalDate findPublishedDateById(@Param("paperId") Long paperId);
+
+    Page<PaperEntity> findAllByStatusOrderByPublishedDateDesc(String status, Pageable pageable);
 }
 
