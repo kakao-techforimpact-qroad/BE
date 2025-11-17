@@ -1,11 +1,10 @@
-package com.qroad.be.domain.paper;
+package com.qroad.be.domain.article;
 
 import com.qroad.be.domain.admin.AdminEntity;
 import com.qroad.be.domain.common.BaseTimeEntity;
+import com.qroad.be.domain.paper.PaperEntity;
 import jakarta.persistence.*;
 import lombok.*;
-
-import java.time.LocalDate;
 
 @Entity
 @Getter
@@ -13,25 +12,35 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@Table(name = "papers")
-public class PaperEntity extends BaseTimeEntity {
+@Table(name = "articles")
+public class ArticleEntity extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "published_date")
-    private LocalDate publishedDate;
-
     @Column(nullable = false, length = 255)
     private String title;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(columnDefinition = "TEXT")
     private String content;
+
+    @Column(columnDefinition = "TEXT")
+    private String summary;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String link;
 
     @Column(nullable = false, length = 10)
     @Builder.Default
     private String status = "ACTIVE";
+
+    @Column(length = 100)
+    private String reporter;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "paper_id")
+    private PaperEntity paper;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "admin_id")
