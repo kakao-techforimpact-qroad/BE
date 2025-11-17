@@ -1,6 +1,6 @@
 package com.qroad.be.domain.paper;
 
-//2025.11.17. - kimyushin (PaperRepository 수정)
+//2025.11.17. - kimyushin (PaperRepository.java 수정)
 //Page<PaperEntity>: 페이징 결과 반환
 //Pageable pageable: 페이지 번호, 크기 정보
 import org.springframework.data.domain.Page;
