@@ -5,7 +5,8 @@ import com.qroad.be.domain.common.BaseTimeEntity;
 import com.qroad.be.domain.paper.PaperEntity;
 import jakarta.persistence.*;
 import lombok.*;
-
+import java.util.ArrayList;
+import java.util.List;
 @Entity
 @Getter
 @Setter
@@ -45,5 +46,8 @@ public class ArticleEntity extends BaseTimeEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "admin_id")
     private AdminEntity admin;
+
+    @Transient
+    private List<String> keywords = new ArrayList<>();
 }
 
