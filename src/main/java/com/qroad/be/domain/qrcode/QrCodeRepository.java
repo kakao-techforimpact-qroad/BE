@@ -17,5 +17,8 @@ public interface QrCodeRepository extends JpaRepository<QrCodeEntity, Long> {
 
     @Query("SELECT q.paper.id FROM QrCodeEntity q WHERE q.qrKey = :qrKey")
     Long findPaperIdByQrKey(@Param("qrKey") String qrKey);
+
+    Optional<QrCodeEntity> findByPaper_IdAndStatus(Long paperId, String status);
+    boolean existsByQrKey(String qrKey);
 }
 
