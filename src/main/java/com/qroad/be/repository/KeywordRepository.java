@@ -10,7 +10,6 @@ import java.util.Optional;
 @Repository
 public interface KeywordRepository extends JpaRepository<KeywordEntity, Long> {
     Optional<KeywordEntity> findByName(String name);
-    List<KeywordEntity> findByStatus(String status);
     boolean existsByName(String name);
 }
 

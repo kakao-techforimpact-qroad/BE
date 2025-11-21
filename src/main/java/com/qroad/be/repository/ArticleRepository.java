@@ -18,12 +18,12 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     List<ArticleEntity> findByReporter(String reporter);
     List<ArticleEntity> findByPaper_IdAndStatus(Long paperId, String status);
 
-    @Query("SELECT new com.qroad.be.domain.article.ArticleSimpleDTO(a.id, a.title) " +
+    @Query("SELECT new com.qroad.be.dto.ArticleSimpleDTO(a.id, a.title) " +
             "FROM ArticleEntity a WHERE a.paper.id = :paperId")
     List<ArticleSimpleDTO> findArticlesByPaperId(@Param("paperId") Long paperId);
 
     @Query("""
-    SELECT new com.qroad.be.domain.article.ArticlesDetailDTO(
+    SELECT new com.qroad.be.dto.ArticlesDetailDTO(
         a.id,
         a.title,
         ad.pressCompany,

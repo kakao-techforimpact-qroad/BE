@@ -20,8 +20,5 @@ public class KeywordEntity extends BaseTimeEntity {
     @Column(nullable = false, unique = true, length = 100)
     private String name;
 
-    @Column(nullable = false, length = 10)
-    @Builder.Default
-    private String status = "ACTIVE";
 }
 

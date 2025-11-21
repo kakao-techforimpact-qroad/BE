@@ -21,7 +21,7 @@ public class ArticleService {
 
         ArticlesDetailDTO articlesDetailDTO = articleRepository.findArticleDetailById(articleId);
         articlesDetailDTO.setArticleRelatedDTOS(articleRelatedRepository.findArticlesByArticleId(articleId));
-        articlesDetailDTO.setArticlePolicyRelatedDTOS(articlePolicyRelatedRepository.findPoliciesByArticleId(articleId));
+        articlesDetailDTO.setPolicyKeywordRelatedDTOS(articlePolicyRelatedRepository.findPoliciesByArticleId(articleId));
 
         return articlesDetailDTO;
     }

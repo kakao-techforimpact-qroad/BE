@@ -1,11 +1,11 @@
 package com.qroad.be.domain;
 
+
 import com.qroad.be.common.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -13,19 +13,19 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@Table(name = "article_related")
-public class ArticleRelatedEntity extends BaseTimeEntity {
+@Table(name = "policy_keyword_related")
+public class PolicyKeywordRelatedEntity extends BaseTimeEntity  {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "article_id", nullable = false)
-    private ArticleEntity article;
+    @JoinColumn(name = "keyword_id", nullable = false)
+    private KeywordEntity keyword;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "related_article_id", nullable = false)
-    private ArticleEntity relatedArticle;
+    @JoinColumn(name = "policy_id", nullable = false)
+    private PolicyEntity policy;
 
     @Column(name = "score")
     private Double score;

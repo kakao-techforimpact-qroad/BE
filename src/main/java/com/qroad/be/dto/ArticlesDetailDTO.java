@@ -12,17 +12,15 @@ import java.util.List;
 @Builder
 public class ArticlesDetailDTO {
 
-    private Long articleId; // 파라미터로 바로 들어오는 값
+    private Long articleId;
     private String title;
-    private String pressCompany; // adminId로 뽑아서 추출
+    private String pressCompany;
     private String reporter;
-    private LocalDate publishedDate; // paperId로 뽑아서 추출
+    private LocalDate publishedDate;
     private String summary;
 
-    // adminId, paperId, title, reporter, summary
-
     private List<ArticleRelatedDTO> articleRelatedDTOS;
-    private List<ArticlePolicyRelatedDTO> articlePolicyRelatedDTOS;
+    private List<PolicyKeywordRelatedDTO> policyKeywordRelatedDTOS;
 
     public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
                              String reporter, LocalDate publishedDate, String summary) {

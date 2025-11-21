@@ -13,7 +13,7 @@ import java.util.List;
 public interface ArticleRelatedRepository extends JpaRepository<ArticleRelatedEntity, Long> {
 
     @Query("""
-    SELECT new com.qroad.be.domain.article_related.ArticleRelatedDTO(
+    SELECT new com.qroad.be.dto.ArticleRelatedDTO(
     ra.relatedArticle.title,
     SUBSTRING(ra.relatedArticle.content, 1, 30),
     ra.relatedArticle.link
