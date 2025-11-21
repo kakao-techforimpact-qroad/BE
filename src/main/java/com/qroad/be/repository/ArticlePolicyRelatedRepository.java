@@ -14,6 +14,7 @@ public interface ArticlePolicyRelatedRepository extends JpaRepository<PolicyKeyw
 
     @Query("""
 SELECT new com.qroad.be.dto.PolicyKeywordRelatedDTO(
+    p.id,
     p.title,
     SUBSTRING(p.content, 1, 30),
     p.link

@@ -9,6 +9,7 @@ import lombok.*;
 @Builder
 public class PolicyKeywordRelatedDTO {
 
+    private Long policyId;
     private String title;
     private String content;
     private String link;

@@ -14,6 +14,7 @@ public interface ArticleRelatedRepository extends JpaRepository<ArticleRelatedEn
 
     @Query("""
     SELECT new com.qroad.be.dto.ArticleRelatedDTO(
+    ra.relatedArticle.id,
     ra.relatedArticle.title,
     SUBSTRING(ra.relatedArticle.content, 1, 30),
     ra.relatedArticle.link

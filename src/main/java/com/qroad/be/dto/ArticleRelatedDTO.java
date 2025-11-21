@@ -9,6 +9,7 @@ import lombok.*;
 @Builder
 public class ArticleRelatedDTO {
 
+    private Long articleId;
     private String title;
     private String content;
     private String link;
