@@ -1,9 +1,8 @@
-package com.qroad.be.common.apiresponse;
+package com.qroad.be.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.qroad.be.domain.PaperEntity;
-import com.qroad.be.dto.ArticleDto;
 import lombok.Builder;
 import lombok.Getter;
 

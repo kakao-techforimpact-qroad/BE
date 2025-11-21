@@ -1,9 +1,9 @@
 package com.qroad.be.controller;
 
 import com.qroad.be.service.PaperService;
-import com.qroad.be.common.apiresponse.PublicationDetailResponse;
-import com.qroad.be.common.apiresponse.PublicationListResponse;
-import com.qroad.be.common.apiresponse.QrCodeResponse;
+import com.qroad.be.dto.PublicationDetailResponse;
+import com.qroad.be.dto.PublicationListResponse;
+import com.qroad.be.dto.QrCodeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
