@@ -106,7 +106,6 @@ CREATE TABLE policy_keyword_related (
     policy_id BIGINT NOT NULL REFERENCES policy(id) ON DELETE CASCADE,
     score DOUBLE PRECISION,
     batch_date DATE NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'active',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
