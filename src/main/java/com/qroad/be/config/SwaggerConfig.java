@@ -1,4 +1,4 @@
-package com.qroad.be.global.config;
+package com.qroad.be.config;
 
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
