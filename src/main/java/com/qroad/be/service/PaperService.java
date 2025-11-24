@@ -26,125 +26,338 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class PaperService {
 
-    private final PaperRepository paperRepository;
-    private final ArticleRepository articleRepository;
-    private final QrCodeRepository qrCodeRepository;
-    private final ArticleKeywordRepository articleKeywordRepository;
-    // ✨ KeywordRepository 제거 (필요 없음)
+        private final PaperRepository paperRepository;
+        private final ArticleRepository articleRepository;
+        private final QrCodeRepository qrCodeRepository;
+        private final ArticleKeywordRepository articleKeywordRepository;
+        private final com.qroad.be.repository.KeywordRepository keywordRepository;
+        private final com.qroad.be.repository.ArticleRelatedRepository articleRelatedRepository;
+        private final com.qroad.be.external.llm.LlmService llmService;
+        private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    /**
-     * API 1: 발행된 신문 리스트 조회
-     */
-    public PublicationListResponse getPublications(int page, int limit) {
-        Pageable pageable = PageRequest.of(page - 1, limit);
+        /**
+         * API 1: 발행된 신문 리스트 조회
+         */
+        public PublicationListResponse getPublications(int page, int limit) {
+                Pageable pageable = PageRequest.of(page - 1, limit);
 
-        Page<PaperEntity> paperPage = paperRepository
-                .findAllByStatusOrderByPublishedDateDesc("ACTIVE", pageable);
+                Page<PaperEntity> paperPage = paperRepository
+                                .findAllByStatusOrderByPublishedDateDesc("ACTIVE", pageable);
 
-        List<PaperSummaryDto> papers = paperPage.getContent().stream()
-                .map(PaperSummaryDto::from)
-                .collect(Collectors.toList());
+                List<PaperSummaryDto> papers = paperPage.getContent().stream()
+                                .map(PaperSummaryDto::from)
+                                .collect(Collectors.toList());
 
-        return new PublicationListResponse(
-                paperPage.getTotalElements(),
-                papers
-        );
-    }
-
-    /**
-     * API 2: 발행 상세 조회 (키워드 포함)
-     */
-    public PublicationDetailResponse getPublicationDetail(Long paperId) {
-        PaperEntity paper = paperRepository.findById(paperId)
-                .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
-
-        List<ArticleEntity> articles = articleRepository
-                .findByPaper_IdAndStatus(paperId, "ACTIVE");
-
-        log.info("조회된 기사 개수: {}", articles.size());
-
-        List<ArticleDto> articleDtos = articles.stream()
-                .map(article -> {
-                    List<String> keywords = getKeywordsForArticle(article.getId());
-                    log.info("기사 ID {}: 키워드 개수 = {}", article.getId(), keywords.size());
-
-                    return ArticleDto.builder()
-                            .id(article.getId())
-                            .title(article.getTitle())
-                            .summary(article.getSummary())
-                            .keywords(keywords)
-                            .build();
-                })
-                .collect(Collectors.toList());
-
-        return PublicationDetailResponse.from(paper, articleDtos);
-    }
-
-    /**
-     * 특정 기사의 키워드 조회
-     */
-    private List<String> getKeywordsForArticle(Long articleId) {
-        // article_keywords 테이블에서 조회
-        List<ArticleKeywordEntity> articleKeywords = articleKeywordRepository
-                .findByArticle_Id(articleId);
-
-        if (articleKeywords.isEmpty()) {
-            log.warn("기사 ID {}에 대한 키워드 연결 없음", articleId);
-            return new ArrayList<>();
+                return new PublicationListResponse(
+                                paperPage.getTotalElements(),
+                                papers);
         }
 
-        // KeywordEntity에서 직접 이름 추출
-        return articleKeywords.stream()
-                .map(ak -> ak.getKeyword().getName())
-                .collect(Collectors.toList());
-    }
+        /**
+         * API 2: 발행 상세 조회
+         */
+        public PublicationDetailResponse getPublicationDetail(Long paperId) {
+                PaperEntity paper = paperRepository.findById(paperId)
+                                .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
 
-    /**
-     * API 3: QR 발행
-     */
-    @Transactional
-    public QrCodeResponse generateQrCode(Long paperId) {
-        PaperEntity paper = paperRepository.findById(paperId)
-                .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
+                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
 
-        Optional<QrCodeEntity> existingQr = qrCodeRepository
-                .findByPaper_IdAndStatus(paperId, "ACTIVE");
+                List<ArticleDto> articleDtos = articles.stream()
+                                .map(article -> {
+                                        List<String> keywords = getKeywordsForArticle(article.getId());
+                                        return ArticleDto.builder()
+                                                        .id(article.getId())
+                                                        .title(article.getTitle())
+                                                        .summary(article.getSummary())
+                                                        .keywords(keywords)
+                                                        .build();
+                                })
+                                .collect(Collectors.toList());
 
-        if (existingQr.isPresent()) {
-            QrCodeEntity qr = existingQr.get();
-            log.info("기존 QR 코드 반환: {}", qr.getQrKey());
-            return new QrCodeResponse(qr.getQrKey(), qr.getQrImageUrl(), qr.getTargetUrl());
+                return PublicationDetailResponse.from(paper, articleDtos);
         }
 
-        String qrKey = generateUniqueQrKey();
-        String targetUrl = "https://yourdomain.com/qr/" + qrKey;
-        String qrImageUrl = "https://yourdomain.com/qr/" + qrKey + ".png";
+        private List<String> getKeywordsForArticle(Long articleId) {
+                return articleKeywordRepository.findByArticle_Id(articleId).stream()
+                                .map(ak -> ak.getKeyword().getName())
+                                .collect(Collectors.toList());
+        }
 
-        QrCodeEntity qrCode = QrCodeEntity.builder()
-                .qrKey(qrKey)
-                .qrImageUrl(qrImageUrl)
-                .targetUrl(targetUrl)
-                .status("ACTIVE")
-                .paper(paper)
-                .admin(paper.getAdmin())
-                .build();
+        /**
+         * API 3: QR 발행
+         */
+        @Transactional
+        public QrCodeResponse generateQrCode(Long paperId) {
+                PaperEntity paper = paperRepository.findById(paperId)
+                                .orElseThrow(() -> new RuntimeException("Paper not found"));
 
-        QrCodeEntity savedQrCode = qrCodeRepository.save(qrCode);
+                String qrKey = generateUniqueQrKey();
+                String targetUrl = "https://qroad.com/qr/" + qrKey; // 실제 도메인으로 변경 필요
+                String qrImageUrl = "https://qroad.com/qr/image/" + qrKey; // 예시 이미지 URL
 
-        log.info("새로운 QR 코드 저장 완료: ID={}, Key={}", savedQrCode.getId(), savedQrCode.getQrKey());
+                QrCodeEntity qrCode = QrCodeEntity.builder()
+                                .paper(paper)
+                                .qrKey(qrKey)
+                                .targetUrl(targetUrl)
+                                .qrImageUrl(qrImageUrl)
+                                .status("ACTIVE")
+                                .build();
 
-        return new QrCodeResponse(
-                savedQrCode.getQrKey(),
-                savedQrCode.getQrImageUrl(),
-                savedQrCode.getTargetUrl()
-        );
-    }
+                qrCodeRepository.save(qrCode);
 
-    private String generateUniqueQrKey() {
-        String qrKey;
-        do {
-            qrKey = UUID.randomUUID().toString().substring(0, 8);
-        } while (qrCodeRepository.existsByQrKey(qrKey));
-        return qrKey;
-    }
+                return new QrCodeResponse(qrKey, qrImageUrl, targetUrl);
+        }
+
+        private String generateUniqueQrKey() {
+                String qrKey;
+                do {
+                        qrKey = UUID.randomUUID().toString().substring(0, 8);
+                } while (qrCodeRepository.existsByQrKey(qrKey));
+                return qrKey;
+        }
+
+        /**
+         * 신문 지면 생성 및 기사 청킹/분석
+         * 1. Paper 저장
+         * 2. GPT로 기사 청킹 및 요약/키워드 추출
+         * 3. Article 저장
+         * 4. Keyword 저장 (중복 체크)
+         * 5. ArticleKeyword 매핑
+         * 6. 임베딩 생성 및 vector_articles 저장
+         * 7. 연관 기사 생성 (updateRelatedArticles 호출)
+         * 8. 생성된 기사 정보 반환
+         */
+        @Transactional
+        public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
+                        com.qroad.be.dto.PaperCreateRequestDTO request) {
+                log.info("신문 지면 생성 시작: title={}, publishedDate={}", request.getTitle(), request.getPublishedDate());
+
+                // 1. Paper 저장
+                PaperEntity paper = PaperEntity.builder()
+                                .title(request.getTitle())
+                                .content(request.getContent())
+                                .publishedDate(request.getPublishedDate())
+                                .status("ACTIVE")
+                                .build();
+
+                PaperEntity savedPaper = paperRepository.save(paper);
+                log.info("Paper 저장 완료: id={}", savedPaper.getId());
+
+                // 2. GPT로 기사 청킹 및 분석
+                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = llmService
+                                .chunkAndAnalyzePaper(request.getContent());
+
+                log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
+
+                // 3. 각 기사 저장 및 키워드 매핑 + 응답 데이터 수집
+                List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
+
+                for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                        // Article 저장
+                        ArticleEntity article = ArticleEntity.builder()
+                                        .title(chunk.getTitle())
+                                        .content(chunk.getContent())
+                                        .summary(chunk.getSummary())
+                                        .reporter(chunk.getReporter())
+                                        .link("") // 기본값
+                                        .status("ACTIVE")
+                                        .paper(savedPaper)
+                                        .build();
+
+                        ArticleEntity savedArticle = articleRepository.save(article);
+                        log.info("Article 저장 완료: id={}, title={}", savedArticle.getId(), savedArticle.getTitle());
+
+                        // 키워드 저장 및 매핑
+                        List<String> savedKeywords = new ArrayList<>();
+                        for (String keywordName : chunk.getKeywords()) {
+                                if (keywordName == null || keywordName.trim().isEmpty()) {
+                                        continue;
+                                }
+
+                                // 키워드 존재 여부 확인 후 저장
+                                com.qroad.be.domain.KeywordEntity keyword = keywordRepository
+                                                .findByName(keywordName.trim())
+                                                .orElseGet(() -> {
+                                                        com.qroad.be.domain.KeywordEntity newKeyword = com.qroad.be.domain.KeywordEntity
+                                                                        .builder()
+                                                                        .name(keywordName.trim())
+                                                                        .build();
+                                                        return keywordRepository.save(newKeyword);
+                                                });
+
+                                // ArticleKeyword 매핑
+                                ArticleKeywordEntity articleKeyword = ArticleKeywordEntity.builder()
+                                                .article(savedArticle)
+                                                .keyword(keyword)
+                                                .build();
+
+                                articleKeywordRepository.save(articleKeyword);
+                                savedKeywords.add(keywordName.trim());
+                                log.info("ArticleKeyword 매핑 완료: articleId={}, keyword={}",
+                                                savedArticle.getId(), keywordName);
+                        }
+
+                        // 임베딩 생성 및 저장
+                        try {
+                                List<Double> embedding = llmService.getEmbedding(chunk.getContent());
+                                String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
+
+                                String sql = "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)";
+                                jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
+                                                savedPaper.getPublishedDate(), vectorString);
+                                log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
+                        } catch (Exception e) {
+                                log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
+                        }
+
+                        // 연관 기사 생성
+                        updateRelatedArticles(savedArticle.getId(), savedKeywords);
+
+                        // 응답 DTO 생성
+                        com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
+                                        .builder()
+                                        .id(savedArticle.getId())
+                                        .title(savedArticle.getTitle())
+                                        .summary(savedArticle.getSummary())
+                                        .keywords(savedKeywords)
+                                        .build();
+
+                        articleResponses.add(articleResponse);
+                }
+
+                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}", savedPaper.getId(), articleChunks.size());
+
+                // 최종 응답 생성
+                return com.qroad.be.dto.PaperCreateResponseDTO.builder()
+                                .paperId(savedPaper.getId())
+                                .articleCount(articleResponses.size())
+                                .articles(articleResponses)
+                                .build();
+        }
+
+        /**
+         * 연관 기사 업데이트
+         * 1. 기존 연관 기사 삭제
+         * 2. 키워드 기반 임베딩 생성
+         * 3. 벡터 유사도 검색으로 연관 기사 3개 추출
+         * 4. 연관 기사 저장
+         */
+        @Transactional
+        public void updateRelatedArticles(Long articleId, List<String> keywords) {
+                if (keywords == null || keywords.isEmpty()) {
+                        return;
+                }
+
+                // 1. 기존 연관 기사 삭제
+                articleRelatedRepository.deleteByArticleId(articleId);
+
+                // 2. 키워드 기반 임베딩 생성
+                String keywordText = String.join(" ", keywords);
+                List<Double> embedding;
+                try {
+                        embedding = llmService.getEmbedding(keywordText);
+                } catch (Exception e) {
+                        log.error("연관 기사 생성을 위한 임베딩 실패: articleId={}", articleId, e);
+                        return;
+                }
+                String vectorString = embedding.toString();
+
+                // 3. 벡터 유사도 검색 (L2 거리 기준, 자기 자신 제외, 상위 3개)
+                // vector_articles 테이블에서 검색
+                String sql = """
+                                    SELECT article_id, vector <-> ?::vector as distance
+                                    FROM vector_articles
+                                    WHERE article_id != ?
+                                    ORDER BY distance ASC
+                                    LIMIT 3
+                                """;
+
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, vectorString, articleId);
+
+                ArticleEntity sourceArticle = articleRepository.findById(articleId)
+                                .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
+
+                // 4. 연관 기사 저장
+                for (Map<String, Object> row : rows) {
+                        Long relatedArticleId = ((Number) row.get("article_id")).longValue();
+                        Double distance = ((Number) row.get("distance")).doubleValue();
+                        // 유사도 점수 변환 (거리가 0이면 유사도 1, 거리가 멀수록 0에 수렴하도록)
+                        // 간단하게 1 / (1 + distance) 사용하거나, 그냥 distance 저장 (여기서는 distance가 작을수록 유사함)
+                        // ArticleRelatedEntity의 score는 높을수록 유사한 것으로 가정하면 변환 필요.
+                        // 여기서는 1 - distance (코사인 거리의 경우) 등을 쓸 수 있으나, L2 거리이므로 적절히 변환.
+                        // 일단 distance 자체를 저장하거나, 1/(1+distance)로 저장.
+                        Double score = 1.0 / (1.0 + distance);
+
+                        ArticleEntity relatedArticle = articleRepository.findById(relatedArticleId)
+                                        .orElse(null);
+
+                        if (relatedArticle != null) {
+                                com.qroad.be.domain.ArticleRelatedEntity relatedEntity = com.qroad.be.domain.ArticleRelatedEntity
+                                                .builder()
+                                                .article(sourceArticle)
+                                                .relatedArticle(relatedArticle)
+                                                .score(score)
+                                                .batchDate(java.time.LocalDate.now())
+                                                .build();
+
+                                articleRelatedRepository.save(relatedEntity);
+                                log.info("연관 기사 저장 완료: source={}, related={}, score={}", articleId, relatedArticleId,
+                                                score);
+                        }
+                }
+        }
+
+        /**
+         * 기사 수정 (요약 및 키워드)
+         */
+        @Transactional
+        public com.qroad.be.dto.ArticleUpdateResponseDTO updateArticle(Long articleId,
+                        com.qroad.be.dto.ArticleUpdateRequestDTO request) {
+                ArticleEntity article = articleRepository.findById(articleId)
+                                .orElseThrow(() -> new RuntimeException("Article not found"));
+
+                // 요약 수정
+                if (request.getSummary() != null) {
+                        article.setSummary(request.getSummary());
+                }
+
+                // 키워드 수정
+                if (request.getKeywords() != null) {
+                        // 기존 키워드 매핑 삭제
+                        articleKeywordRepository.deleteByArticleId(articleId);
+
+                        // 새 키워드 저장 및 매핑
+                        for (String keywordName : request.getKeywords()) {
+                                if (keywordName == null || keywordName.trim().isEmpty())
+                                        continue;
+
+                                com.qroad.be.domain.KeywordEntity keyword = keywordRepository
+                                                .findByName(keywordName.trim())
+                                                .orElseGet(() -> keywordRepository
+                                                                .save(com.qroad.be.domain.KeywordEntity.builder()
+                                                                                .name(keywordName.trim())
+                                                                                .build()));
+
+                                articleKeywordRepository.save(ArticleKeywordEntity.builder()
+                                                .article(article)
+                                                .keyword(keyword)
+                                                .build());
+                        }
+
+                        // 연관 기사 업데이트
+                        updateRelatedArticles(articleId, request.getKeywords());
+                }
+
+                ArticleEntity savedArticle = articleRepository.save(article);
+
+                // 최신 키워드 조회
+                List<String> currentKeywords = getKeywordsForArticle(savedArticle.getId());
+
+                return com.qroad.be.dto.ArticleUpdateResponseDTO.builder()
+                                .articleId(savedArticle.getId())
+                                .title(savedArticle.getTitle())
+                                .summary(savedArticle.getSummary())
+                                .keywords(currentKeywords)
+                                .build();
+        }
 }
