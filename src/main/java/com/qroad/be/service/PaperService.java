@@ -34,6 +34,8 @@ public class PaperService {
         private final com.qroad.be.repository.ArticleRelatedRepository articleRelatedRepository;
         private final com.qroad.be.external.llm.LlmService llmService;
         private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+        private final com.qroad.be.repository.PolicyRepository policyRepository;
+        private final com.qroad.be.repository.PolicyArticleRelatedRepository policyArticleRelatedRepository;
 
         /**
          * API 1: 발행된 신문 리스트 조회
@@ -212,6 +214,8 @@ public class PaperService {
 
                         // 연관 기사 생성
                         updateRelatedArticles(savedArticle.getId(), savedKeywords);
+                        // 연관 정책 생성
+                        updateRelatedPolicies(savedArticle.getId(), savedKeywords);
 
                         // 응답 DTO 생성
                         com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
@@ -308,6 +312,68 @@ public class PaperService {
         }
 
         /**
+         * 연관 정책 업데이트 (키워드 기반 벡터 유사도 검색)
+         */
+        @Transactional
+        public void updateRelatedPolicies(Long articleId, List<String> keywords) {
+                if (keywords == null || keywords.isEmpty()) {
+                        return;
+                }
+
+                // 1. 기존 연관 정책 삭제
+                policyArticleRelatedRepository.deleteByArticleId(articleId);
+
+                // 2. 키워드 기반 임베딩 생성
+                String keywordText = String.join(" ", keywords);
+                List<Double> embedding;
+                try {
+                        embedding = llmService.getEmbedding(keywordText);
+                } catch (Exception e) {
+                        log.error("연관 정책 생성을 위한 임베딩 실패: articleId={}", articleId, e);
+                        return;
+                }
+                String vectorString = embedding.toString();
+
+                // 3. 벡터 유사도 검색 (L2 거리 기준, 상위 3개)
+                String sql = """
+                                    SELECT policy_id, vector <-> ?::vector as distance
+                                    FROM vector_policy
+                                    ORDER BY distance ASC
+                                    LIMIT 3
+                                """;
+
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, vectorString);
+
+                ArticleEntity sourceArticle = articleRepository.findById(articleId)
+                                .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
+
+                // 4. 연관 정책 저장
+                for (Map<String, Object> row : rows) {
+                        Long policyId = ((Number) row.get("policy_id")).longValue();
+                        Double distance = ((Number) row.get("distance")).doubleValue();
+                        Double score = 1.0 / (1.0 + distance);
+
+                        com.qroad.be.domain.PolicyEntity policy = policyRepository.findById(policyId)
+                                        .orElse(null);
+
+                        if (policy != null) {
+                                com.qroad.be.domain.PolicyArticleRelatedEntity relatedEntity = com.qroad.be.domain.PolicyArticleRelatedEntity
+                                                .builder()
+                                                .article(sourceArticle)
+                                                .policy(policy)
+                                                .score(score)
+                                                .batchDate(java.time.LocalDate.now())
+                                                .status("active")
+                                                .build();
+
+                                policyArticleRelatedRepository.save(relatedEntity);
+                                log.info("연관 정책 저장 완료: article={}, policy={}, score={}",
+                                                articleId, policyId, score);
+                        }
+                }
+        }
+
+        /**
          * 기사 수정 (요약 및 키워드)
          */
         @Transactional
@@ -346,6 +412,8 @@ public class PaperService {
 
                         // 연관 기사 업데이트
                         updateRelatedArticles(articleId, request.getKeywords());
+                        // 연관 정책 업데이트
+                        updateRelatedPolicies(articleId, request.getKeywords());
                 }
 
                 ArticleEntity savedArticle = articleRepository.save(article);
