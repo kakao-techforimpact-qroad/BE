@@ -13,15 +13,16 @@ import java.util.List;
 public interface ArticleRelatedRepository extends JpaRepository<ArticleRelatedEntity, Long> {
 
     @Query("""
-    SELECT new com.qroad.be.dto.ArticleRelatedDTO(
-    ra.relatedArticle.id,
-    ra.relatedArticle.title,
-    SUBSTRING(ra.relatedArticle.content, 1, 30),
-    ra.relatedArticle.link
-)
-FROM ArticleRelatedEntity ra
-WHERE ra.article.id = :articleId
-""")
+                SELECT new com.qroad.be.dto.ArticleRelatedDTO(
+                ra.relatedArticle.id,
+                ra.relatedArticle.title,
+                SUBSTRING(ra.relatedArticle.content, 1, 30),
+                ra.relatedArticle.link
+            )
+            FROM ArticleRelatedEntity ra
+            WHERE ra.article.id = :articleId
+            """)
     List<ArticleRelatedDTO> findArticlesByArticleId(@Param("articleId") Long articleId);
 
+    void deleteByArticleId(Long articleId);
 }

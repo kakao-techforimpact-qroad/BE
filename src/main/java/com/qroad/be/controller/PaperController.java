@@ -43,10 +43,10 @@ public class PaperController {
             HttpSession session) {
 
         // 세션 확인
-       // ResponseEntity<?> sessionCheck = checkSession(session);
-        //if (sessionCheck != null) {
-         //   return sessionCheck;
-       // }
+        // ResponseEntity<?> sessionCheck = checkSession(session);
+        // if (sessionCheck != null) {
+        // return sessionCheck;
+        // }
 
         PublicationListResponse response = paperService.getPublications(page, limit);
         return ResponseEntity.ok(response);
@@ -61,10 +61,10 @@ public class PaperController {
             HttpSession session) {
 
         // 세션 확인
-       // ResponseEntity<?> sessionCheck = checkSession(session);
-        //if (sessionCheck != null) {
-        //    return sessionCheck;
-        //}
+        // ResponseEntity<?> sessionCheck = checkSession(session);
+        // if (sessionCheck != null) {
+        // return sessionCheck;
+        // }
 
         PublicationDetailResponse response = paperService.getPublicationDetail(paperId);
         return ResponseEntity.ok(response);
@@ -79,12 +79,39 @@ public class PaperController {
             HttpSession session) {
 
         // 세션 확인
-        //ResponseEntity<?> sessionCheck = checkSession(session);
-        //if (sessionCheck != null) {
-        //    return sessionCheck;
-        //}
+        // ResponseEntity<?> sessionCheck = checkSession(session);
+        // if (sessionCheck != null) {
+        // return sessionCheck;
+        // }
 
         QrCodeResponse response = paperService.generateQrCode(paperId);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * API 4: 신문 지면 생성 (GPT 기반 기사 청킹 및 분석)
+     */
+    @PostMapping("/publications")
+    public ResponseEntity<?> createPaper(
+            @RequestBody com.qroad.be.dto.PaperCreateRequestDTO request,
+            HttpSession session) {
+
+        // 세션 확인 (필요시 활성화)
+        // ResponseEntity<?> sessionCheck = checkSession(session);
+        // if (sessionCheck != null) {
+        // return sessionCheck;
+        // }
+
+        try {
+            com.qroad.be.dto.PaperCreateResponseDTO response = paperService.createPaperWithArticles(request);
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", "신문 지면 생성 중 오류가 발생했습니다: " + e.getMessage());
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 }
