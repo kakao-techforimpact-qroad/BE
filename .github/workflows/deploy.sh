@@ -8,9 +8,9 @@ git pull origin main
 echo "Building the project..."
 ./gradlew clean build -x test
 
-# 3. 애플리케이션 실행 (JAR 파일이 /path/to/your-app.jar에 있다고 가정)
+# 3. 애플리케이션 실행
 echo "Starting the application..."
-nohup java -jar /home/ubuntu/be-0.0.1-SNAPSHOT.jar > output.log 2>&1 &
+nohup java -jar /home/ubuntu/BE/build/libs/be-0.0.1-SNAPSHOT.jar > /home/ubuntu/output.log 2>&1 &
 
 # 4. 배포 완료 메시지
 echo "Deployment complete!"
