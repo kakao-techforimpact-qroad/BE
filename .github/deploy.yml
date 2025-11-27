@@ -20,4 +20,4 @@ jobs:
 
     - name: Deploy to server
       run: |
-        ssh -o StrictHostKeyChecking=no user@http://qroadtest.duckdns.org/ "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
+        ssh -o StrictHostKeyChecking=no user@qroadtest.duckdns.org "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
