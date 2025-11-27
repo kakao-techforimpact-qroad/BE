@@ -21,7 +21,7 @@ public class AdminAuthController {
     private final AdminService adminService;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody AdminLoginRequestDTO req, HttpSession session) {
+    public ResponseEntity<String> login(@RequestBody AdminLoginRequestDTO req, HttpSession session) {
 
         AdminEntity admin = adminService.login(req.getLoginId(), req.getPassword());
 
@@ -37,13 +37,13 @@ public class AdminAuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpSession session) {
+    public ResponseEntity<String> logout(HttpSession session) {
         session.invalidate();
         return ResponseEntity.ok("로그아웃 완료");
     }
 
     @PostMapping("/register")
-    public ResponseEntity<?> createAdmin(@RequestBody AdminCreateRequestDTO req) {
+    public ResponseEntity<String> createAdmin(@RequestBody AdminCreateRequestDTO req) {
 
         AdminEntity saved = adminService.createAdmin(
                 req.getLoginId(),
@@ -58,7 +58,7 @@ public class AdminAuthController {
 
     // 세션 확인용 API
     @GetMapping("/me")
-    public ResponseEntity<?> me(HttpSession session) {
+    public ResponseEntity<String> me(HttpSession session) {
         Long adminId = (Long) session.getAttribute("adminId");
 
         if (adminId == null) {
