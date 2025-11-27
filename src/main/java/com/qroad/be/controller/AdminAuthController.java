@@ -68,4 +68,10 @@ public class AdminAuthController {
         return ResponseEntity.ok("현재 로그인된 관리자 ID: " + adminId);
     }
 
+    @GetMapping("/")
+    public ResponseEntity<String> test() {
+
+        return ResponseEntity.ok("test");
+    }
+
 }
