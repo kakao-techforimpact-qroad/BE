@@ -71,7 +71,7 @@ public class AdminAuthController {
     @GetMapping("/")
     public ResponseEntity<String> test() {
 
-        return ResponseEntity.ok("test");
+        return ResponseEntity.ok("test입니다.");
     }
 
 }
