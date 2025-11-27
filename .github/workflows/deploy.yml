@@ -26,7 +26,8 @@ jobs:
           --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
           --protocol tcp \
           --port 22 \
-          --cidr $RUNNER_IP/32
+          --cidr $RUNNER_IP/32 \
+          --region ap-northeast-2 
           
     # 3. 서버에 SSH로 접속하고 배포 스크립트 실행
     - name: Deploy to server
@@ -45,4 +46,5 @@ jobs:
           --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
           --protocol tcp \
           --port 22 \
-          --cidr $RUNNER_IP/32
+          --cidr $RUNNER_IP/32 \
+          --region ap-northeast-2
