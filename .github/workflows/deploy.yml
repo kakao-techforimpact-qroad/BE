@@ -50,7 +50,14 @@ jobs:
         chmod 600 /tmp/private_key
         
         # SSH 명령어로 배포
-        ssh -o StrictHostKeyChecking=no -i /tmp/private_key ubuntu@qroadtest.duckdns.org "cd /home/ubuntu/BE && git pull && ./deploy.sh"
+        ssh -o StrictHostKeyChecking=no -i /tmp/private_key ubuntu@qroadtest.duckdns.org "
+        cd /home/ubuntu/BE && 
+        git pull && 
+        export DB_URL='${{ secrets.DB_URL }}' && 
+        export DB_USER='${{ secrets.DB_USER }}' && 
+        export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && 
+        export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' &&
+        ./deploy.sh"
 
     # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
     - name: Remove GitHub Actions IP from Security Group
