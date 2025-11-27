@@ -1,10 +1,14 @@
 package com.qroad.be.domain;
 
 import com.qroad.be.common.BaseTimeEntity;
+import com.qroad.be.external.policy.PolicyNewsDTO;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 @Entity
 @Getter
@@ -19,10 +23,10 @@ public class PolicyEntity extends BaseTimeEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 100)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String title;
 
-    @Column(name = "sub_title", length = 100)
+    @Column(name = "sub_title", columnDefinition = "TEXT")
     private String subTitle;
 
     @Column(columnDefinition = "TEXT")
@@ -31,7 +35,7 @@ public class PolicyEntity extends BaseTimeEntity {
     @Column(name = "minister_name", length = 100)
     private String ministerName;
 
-    @Column(name = "original_url", nullable = false, length = 255)
+    @Column(name = "original_url", nullable = false, columnDefinition = "TEXT")
     private String link;
 
     @Column(name = "registration_date")
@@ -40,5 +44,27 @@ public class PolicyEntity extends BaseTimeEntity {
     @Column(nullable = false, length = 10)
     @Builder.Default
     private String status = "ACTIVE";
+
+    public static PolicyEntity fromDto(PolicyNewsDTO dto) {
+        return PolicyEntity.builder()
+                .title(dto.getTitle())
+                .subTitle(dto.getSubTitle1())
+                .content(dto.getDataContents())   // HTML 제거된 순수 텍스트
+                .ministerName(dto.getMinisterName())
+                .link(dto.getOriginalUrl())
+                .registrationDate(parseApproveDate(dto.getApproveDate()))
+                .status("ACTIVE")
+                .build();
+    }
+
+    private static ZonedDateTime parseApproveDate(String dateString) {
+        try {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm:ss");
+            LocalDateTime local = LocalDateTime.parse(dateString, formatter);
+            return local.atZone(ZoneId.of("Asia/Seoul"));
+        } catch (Exception e) {
+            return ZonedDateTime.now(ZoneId.of("Asia/Seoul"));
+        }
+    }
 }
 

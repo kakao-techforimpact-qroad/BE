@@ -12,11 +12,11 @@ import java.time.ZonedDateTime;
 public abstract class BaseTimeEntity {
 
     @CreationTimestamp
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private ZonedDateTime createdAt;
 
     @UpdateTimestamp
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", insertable = false)
     private ZonedDateTime updatedAt;
 }
 
