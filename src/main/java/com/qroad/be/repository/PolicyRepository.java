@@ -10,5 +10,6 @@ import java.util.List;
 public interface PolicyRepository extends JpaRepository<PolicyEntity, Long> {
     List<PolicyEntity> findByStatus(String status);
     List<PolicyEntity> findByMinisterName(String ministerName);
+    boolean existsBylink(String originalUrl);
 }
 
