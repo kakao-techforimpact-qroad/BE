@@ -10,11 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. GitHub 리포지토리 코드 가져오기
+    # 1. AWS 자격 증명 설정
+    - name: Set up AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-northeast-2  # 사용할 리전
+        
+    # 2. GitHub 리포지토리 코드 가져오기
     - name: Checkout code
       uses: actions/checkout@v2  # 코드 체크아웃
 
-    # 2. GitHub Actions의 IP를 보안 그룹에 추가
+    # 3. GitHub Actions의 IP를 보안 그룹에 추가
     - name: Add GitHub Actions IP to Security Group
       run: |
         # GitHub Actions의 공인 IP 주소 가져오기
@@ -29,12 +37,12 @@ jobs:
           --cidr $RUNNER_IP/32 \
           --region ap-northeast-2 
           
-    # 3. 서버에 SSH로 접속하고 배포 스크립트 실행
+    # 4. 서버에 SSH로 접속하고 배포 스크립트 실행
     - name: Deploy to server
       run: |
         ssh -o StrictHostKeyChecking=no user@qroadtest.duckdns.org "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
 
-    # 4. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
+    # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
     - name: Remove GitHub Actions IP from Security Group
       if: always()  # 이전 단계가 실패하더라도 항상 실행
       run: |
