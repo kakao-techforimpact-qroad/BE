@@ -1,0 +1,23 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2  # 코드 체크아웃
+
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.3
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # GitHub Secrets에서 SSH 개인 키 사용
+
+    - name: Deploy to server
+      run: |
+        ssh -o StrictHostKeyChecking=no user@http://qroadtest.duckdns.org/ "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
