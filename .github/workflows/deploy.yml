@@ -10,14 +10,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. GitHub 리포지토리 코드 가져오기
     - name: Checkout code
       uses: actions/checkout@v2  # 코드 체크아웃
 
-    - name: Set up SSH
-      uses: webfactory/ssh-agent@v0.5.3
-      with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # GitHub Secrets에서 SSH 개인 키 사용
-
+    # 2. GitHub Actions의 IP를 보안 그룹에 추가
+    - name: Add GitHub Actions IP to Security Group
+      run: |
+        # GitHub Actions의 공인 IP 주소 가져오기
+        RUNNER_IP=$(curl -s https://api.ipify.org)
+        echo "Add GitHub Actions IP to Security Group: $RUNNER_IP"
+        
+        # AWS CLI로 보안 그룹에 추가
+        aws ec2 authorize-security-group-ingress \
+          --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
+          --protocol tcp \
+          --port 22 \
+          --cidr $RUNNER_IP/32
+          
+    # 3. 서버에 SSH로 접속하고 배포 스크립트 실행
     - name: Deploy to server
       run: |
         ssh -o StrictHostKeyChecking=no user@qroadtest.duckdns.org "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
+
+    # 4. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
+    - name: Remove GitHub Actions IP from Security Group
+      if: always()  # 이전 단계가 실패하더라도 항상 실행
+      run: |
+        RUNNER_IP=$(curl -s https://api.ipify.org)
+        echo "Remove GitHub Actions IP from Security Group: $RUNNER_IP"
+        
+        # AWS CLI로 보안 그룹에서 제거
+        aws ec2 revoke-security-group-ingress \
+          --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
+          --protocol tcp \
+          --port 22 \
+          --cidr $RUNNER_IP/32
