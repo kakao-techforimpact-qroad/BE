@@ -41,7 +41,12 @@ jobs:
     # 4. 서버에 SSH로 접속하고 배포 스크립트 실행
     - name: Deploy to server
       run: |
-        ssh -o StrictHostKeyChecking=no user@qroadtest.duckdns.org "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
+        # SSH 키를 /tmp/private_key에 저장
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/private_key
+        chmod 600 /tmp/private_key
+        
+        # SSH 명령어로 배포
+        ssh -o StrictHostKeyChecking=no -i /tmp/private_key user@qroadtest.duckdns.org "cd /home/ubuntu && git pull git@github.com:kakao-techforimpact-qroad/BE.git && ./deploy.sh"
 
     # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
     - name: Remove GitHub Actions IP from Security Group
