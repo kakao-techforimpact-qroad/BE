@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:  # 환경변수 등록
       DB_URL: ${{ secrets.DB_URL }}
-      DB_USER: ${{ secrets.DB_USER }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
@@ -54,7 +54,7 @@ jobs:
         cd /home/ubuntu/BE && 
         git pull && 
         export DB_URL='${{ secrets.DB_URL }}' && 
-        export DB_USER='${{ secrets.DB_USER }}' && 
+        export DB_USERNAME='${{ secrets.DB_USERNAME }}' && 
         export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && 
         export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' &&
         ./deploy.sh"
