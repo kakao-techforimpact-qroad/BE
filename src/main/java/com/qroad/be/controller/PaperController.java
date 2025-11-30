@@ -96,14 +96,17 @@ public class PaperController {
             @RequestBody com.qroad.be.dto.PaperCreateRequestDTO request,
             HttpSession session) {
 
-        // 세션 확인 (필요시 활성화)
-        // ResponseEntity<?> sessionCheck = checkSession(session);
-        // if (sessionCheck != null) {
-        // return sessionCheck;
-        // }
+        // 세션 확인
+        ResponseEntity<?> sessionCheck = checkSession(session);
+        if (sessionCheck != null) {
+            return sessionCheck;
+        }
 
         try {
-            com.qroad.be.dto.PaperCreateResponseDTO response = paperService.createPaperWithArticles(request);
+            // 세션에서 adminId 추출
+            Long adminId = (Long) session.getAttribute("adminId");
+
+            com.qroad.be.dto.PaperCreateResponseDTO response = paperService.createPaperWithArticles(request, adminId);
 
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (Exception e) {
