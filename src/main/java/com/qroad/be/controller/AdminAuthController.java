@@ -45,15 +45,13 @@ public class AdminAuthController {
     @PostMapping("/register")
     public ResponseEntity<String> createAdmin(@RequestBody AdminCreateRequestDTO req) {
 
-        AdminEntity saved = adminService.createAdmin(
+        String message = adminService.createAdmin(
                 req.getLoginId(),
                 req.getPassword(),
                 req.getPressCompany()
         );
 
-        return ResponseEntity.ok(
-                "관리자 생성 완료 (id=" + saved.getId() + ")"
-        );
+        return ResponseEntity.ok(message);
     }
 
     // 세션 확인용 API
@@ -66,12 +64,6 @@ public class AdminAuthController {
         }
 
         return ResponseEntity.ok("현재 로그인된 관리자 ID: " + adminId);
-    }
-
-    @GetMapping("/")
-    public ResponseEntity<String> test() {
-
-        return ResponseEntity.ok("test입니다.");
     }
 
 }
