@@ -20,7 +20,12 @@ public class AdminService {
     private final AdminRepository adminRepository;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-    public AdminEntity createAdmin(String loginId, String rawPassword, String pressCompany) {
+    public String createAdmin(String loginId, String rawPassword, String pressCompany) {
+
+        if(adminRepository.existsByLoginId(loginId)){
+            return "이미 존재하는 아이디입니다.";
+        }
+
         AdminEntity admin = AdminEntity.builder()
                 .loginId(loginId)
                 .password(encoder.encode(rawPassword))
@@ -28,7 +33,8 @@ public class AdminService {
                 .status("ACTIVE")
                 .build();
 
-        return adminRepository.save(admin);
+        adminRepository.save(admin);
+        return "회원가입이 완료 되었습니다.";
     }
 
     public AdminEntity login(String loginId, String rawPassword) {
