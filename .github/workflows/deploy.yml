@@ -1,0 +1,75 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # 수동 실행을 가능하게 하는 트리거
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:  # 환경변수 등록
+      DB_URL: ${{ secrets.DB_URL }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+    # 1. AWS 자격 증명 설정
+    - name: Set up AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-southeast-2  # 사용할 리전
+        
+    # 2. GitHub 리포지토리 코드 가져오기
+    - name: Checkout code
+      uses: actions/checkout@v2  # 코드 체크아웃
+
+    # 3. GitHub Actions의 IP를 보안 그룹에 추가
+    - name: Add GitHub Actions IP to Security Group
+      run: |
+        # GitHub Actions의 공인 IP 주소 가져오기
+        RUNNER_IP=$(curl -s https://api.ipify.org)
+        echo "Add GitHub Actions IP to Security Group: $RUNNER_IP"
+        
+        # AWS CLI로 보안 그룹에 추가
+        aws ec2 authorize-security-group-ingress \
+          --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
+          --protocol tcp \
+          --port 22 \
+          --cidr $RUNNER_IP/32 \
+          --region ap-southeast-2 
+          
+    # 4. 서버에 SSH로 접속하고 배포 스크립트 실행
+    - name: Deploy to server
+      run: |
+        # SSH 키를 /tmp/private_key에 저장
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/private_key
+        chmod 600 /tmp/private_key
+        
+        # SSH 명령어로 배포
+        ssh -o StrictHostKeyChecking=no -i /tmp/private_key ubuntu@qroadtest.duckdns.org "
+        cd /home/ubuntu/BE && 
+        git pull && 
+        export DB_URL='${{ secrets.DB_URL }}' && 
+        export DB_USERNAME='${{ secrets.DB_USERNAME }}' && 
+        export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && 
+        export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' &&
+        ./deploy.sh"
+
+    # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
+    - name: Remove GitHub Actions IP from Security Group
+      if: always()  # 이전 단계가 실패하더라도 항상 실행
+      run: |
+        RUNNER_IP=$(curl -s https://api.ipify.org)
+        echo "Remove GitHub Actions IP from Security Group: $RUNNER_IP"
+        
+        # AWS CLI로 보안 그룹에서 제거
+        aws ec2 revoke-security-group-ingress \
+          --group-id ${{ secrets.AWS_SECURITY_GROUP_ID }} \
+          --protocol tcp \
+          --port 22 \
+          --cidr $RUNNER_IP/32 \
+          --region ap-southeast-2
