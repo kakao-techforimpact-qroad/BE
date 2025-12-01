@@ -7,7 +7,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PolicyKeywordRelatedDTO {
+public class PolicyArticleRelatedDTO {
 
     private Long policyId;
     private String title;

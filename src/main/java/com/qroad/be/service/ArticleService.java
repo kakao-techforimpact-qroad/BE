@@ -1,7 +1,7 @@
 package com.qroad.be.service;
 
 import com.qroad.be.dto.ArticleRelatedDTO;
-import com.qroad.be.dto.PolicyKeywordRelatedDTO;
+import com.qroad.be.dto.PolicyArticleRelatedDTO;
 import com.qroad.be.repository.ArticlePolicyRelatedRepository;
 import com.qroad.be.repository.ArticleRelatedRepository;
 import com.qroad.be.dto.ArticlesDetailDTO;
@@ -35,15 +35,15 @@ public class ArticleService {
                 articleRelatedRepository.findArticlesByArticleId(articleId);
 
         if (relatedArticles != null && !relatedArticles.isEmpty()) {
-            dto.getArticleRelatedDTOS().addAll(relatedArticles);
+            dto.setArticleRelatedDTOS(relatedArticles);
         }
 
         // 3. 정책 키워드 관련 리스트 추가
-        List<PolicyKeywordRelatedDTO> policyKeywords =
+        List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS =
                 articlePolicyRelatedRepository.findPoliciesByArticleId(articleId);
 
-        if (policyKeywords != null && !policyKeywords.isEmpty()) {
-            dto.getPolicyKeywordRelatedDTOS().addAll(policyKeywords);
+        if (policyArticleRelatedDTOS != null && !policyArticleRelatedDTOS.isEmpty()) {
+            dto.setPolicyArticleRelatedDTOS(policyArticleRelatedDTOS);
         }
 
         return dto;

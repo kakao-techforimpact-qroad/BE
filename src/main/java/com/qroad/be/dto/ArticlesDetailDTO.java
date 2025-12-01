@@ -20,7 +20,7 @@ public class ArticlesDetailDTO {
     private String summary;
 
     private List<ArticleRelatedDTO> articleRelatedDTOS;
-    private List<PolicyKeywordRelatedDTO> policyKeywordRelatedDTOS;
+    private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;
 
     public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
                              String reporter, LocalDate publishedDate, String summary) {
