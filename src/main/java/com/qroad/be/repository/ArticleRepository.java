@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
@@ -36,7 +37,7 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     JOIN a.admin ad
     WHERE a.id = :id
     """)
-    ArticlesDetailDTO findArticleDetailById(@Param("id") Long id);
+    Optional<ArticlesDetailDTO> findArticleDetailById(@Param("id") Long id);
 
 }
 
