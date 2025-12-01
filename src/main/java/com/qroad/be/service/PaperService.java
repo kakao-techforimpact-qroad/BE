@@ -4,6 +4,7 @@ import com.qroad.be.domain.PaperEntity;
 import com.qroad.be.domain.ArticleKeywordEntity;
 import com.qroad.be.domain.ArticleEntity;
 import com.qroad.be.domain.QrCodeEntity;
+import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.dto.*;
 import com.qroad.be.repository.ArticleRepository;
 import com.qroad.be.repository.PaperRepository;
@@ -131,8 +132,16 @@ public class PaperService {
          */
         @Transactional
         public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
-                        com.qroad.be.dto.PaperCreateRequestDTO request) {
-                log.info("신문 지면 생성 시작: title={}, publishedDate={}", request.getTitle(), request.getPublishedDate());
+                        com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId) {
+                log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
+                                request.getTitle(), request.getPublishedDate(), adminId);
+
+                // Admin 조회
+                AdminEntity admin = null;
+                if (adminId != null) {
+                        admin = new AdminEntity();
+                        admin.setId(adminId);
+                }
 
                 // 1. Paper 저장
                 PaperEntity paper = PaperEntity.builder()
@@ -140,10 +149,11 @@ public class PaperService {
                                 .content(request.getContent())
                                 .publishedDate(request.getPublishedDate())
                                 .status("ACTIVE")
+                                .admin(admin)
                                 .build();
 
                 PaperEntity savedPaper = paperRepository.save(paper);
-                log.info("Paper 저장 완료: id={}", savedPaper.getId());
+                log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
                 // 2. GPT로 기사 청킹 및 분석
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = llmService
@@ -164,10 +174,12 @@ public class PaperService {
                                         .link("") // 기본값
                                         .status("ACTIVE")
                                         .paper(savedPaper)
+                                        .admin(admin)
                                         .build();
 
                         ArticleEntity savedArticle = articleRepository.save(article);
-                        log.info("Article 저장 완료: id={}, title={}", savedArticle.getId(), savedArticle.getTitle());
+                        log.info("Article 저장 완료: id={}, title={}, adminId={}",
+                                        savedArticle.getId(), savedArticle.getTitle(), adminId);
 
                         // 키워드 저장 및 매핑
                         List<String> savedKeywords = new ArrayList<>();
@@ -229,7 +241,8 @@ public class PaperService {
                         articleResponses.add(articleResponse);
                 }
 
-                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}", savedPaper.getId(), articleChunks.size());
+                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
+                                savedPaper.getId(), articleChunks.size(), adminId);
 
                 // 최종 응답 생성
                 return com.qroad.be.dto.PaperCreateResponseDTO.builder()
