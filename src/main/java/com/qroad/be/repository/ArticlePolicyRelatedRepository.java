@@ -1,7 +1,7 @@
 package com.qroad.be.repository;
 
 import com.qroad.be.domain.PolicyArticleRelatedEntity;
-import com.qroad.be.dto.PolicyKeywordRelatedDTO;
+import com.qroad.be.dto.PolicyArticleRelatedDTO;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,7 +13,7 @@ import java.util.List;
 public interface ArticlePolicyRelatedRepository extends JpaRepository<PolicyArticleRelatedEntity, Long> {
 
     @Query("""
-            SELECT new com.qroad.be.dto.PolicyKeywordRelatedDTO(
+            SELECT new com.qroad.be.dto.PolicyArticleRelatedDTO(
                 p.id,
                 p.title,
                 SUBSTRING(p.content, 1, 30),
@@ -23,5 +23,5 @@ public interface ArticlePolicyRelatedRepository extends JpaRepository<PolicyArti
             JOIN par.policy p
             WHERE par.article.id = :articleId
             """)
-    List<PolicyKeywordRelatedDTO> findPoliciesByArticleId(@Param("articleId") Long articleId);
+    List<PolicyArticleRelatedDTO> findPoliciesByArticleId(@Param("articleId") Long articleId);
 }
