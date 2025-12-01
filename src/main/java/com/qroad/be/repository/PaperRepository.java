@@ -25,5 +25,6 @@ public interface PaperRepository extends JpaRepository<PaperEntity, Long> {
     LocalDate findPublishedDateById(@Param("paperId") Long paperId);
 
     Page<PaperEntity> findAllByStatusOrderByPublishedDateDesc(String status, Pageable pageable);
+    Page<PaperEntity> findByAdminIdAndStatusOrderByPublishedDateDesc(Long adminId, String status, Pageable pageable);
 }
 

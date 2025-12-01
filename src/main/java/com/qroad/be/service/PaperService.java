@@ -40,11 +40,11 @@ public class PaperService {
         /**
          * API 1: 발행된 신문 리스트 조회
          */
-        public PublicationListResponse getPublications(int page, int limit) {
+        public PublicationListResponse getPublications(int page, int limit, Long adminId) {
                 Pageable pageable = PageRequest.of(page - 1, limit);
 
                 Page<PaperEntity> paperPage = paperRepository
-                                .findAllByStatusOrderByPublishedDateDesc("ACTIVE", pageable);
+                                .findByAdminIdAndStatusOrderByPublishedDateDesc(adminId, "ACTIVE", pageable);
 
                 List<PaperSummaryDto> papers = paperPage.getContent().stream()
                                 .map(PaperSummaryDto::from)

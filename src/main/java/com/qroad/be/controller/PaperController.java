@@ -42,16 +42,31 @@ public class PaperController {
             @RequestParam(defaultValue = "10") int limit,
             HttpSession session) {
 
-        // 세션 확인
-        // ResponseEntity<?> sessionCheck = checkSession(session);
-        // if (sessionCheck != null) {
-        // return sessionCheck;
-        // }
 
-        PublicationListResponse response = paperService.getPublications(page, limit);
+        Long adminId = getAdminIdFromSession(session);
+        if (adminId == null) {
+            return unauthorizedResponse();
+        }
+
+        PublicationListResponse response = paperService.getPublications(page, limit, adminId);
         return ResponseEntity.ok(response);
     }
 
+    //세션에서 api adminId 가져오기
+    private Long getAdminIdFromSession(HttpSession session) {
+        if (session == null || session.getAttribute("adminId") == null) {
+            return null;
+        }
+        return (Long) session.getAttribute("adminId");
+    }
+
+    //인증 실패 응답
+    private ResponseEntity<?> unauthorizedResponse() {
+        Map<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("success", false);
+        errorResponse.put("message", "로그인이 필요합니다");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
     /**
      * API 2: 발행 상세 조회
      */
@@ -59,13 +74,6 @@ public class PaperController {
     public ResponseEntity<?> getPublicationDetail(
             @PathVariable Long paperId,
             HttpSession session) {
-
-        // 세션 확인
-        // ResponseEntity<?> sessionCheck = checkSession(session);
-        // if (sessionCheck != null) {
-        // return sessionCheck;
-        // }
-
         PublicationDetailResponse response = paperService.getPublicationDetail(paperId);
         return ResponseEntity.ok(response);
     }
