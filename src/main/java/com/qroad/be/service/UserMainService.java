@@ -21,9 +21,8 @@ public class UserMainService {
     private final PaperRepository paperRepository;
     private final ArticleRepository articleRepository;
 
-    public UserMainDTO getPagerByQrKey(String qrKey) {
+    public UserMainDTO getPagerById(Long paperId) {
 
-        Long paperId = qrCodeRepository.findPaperIdByQrKey(qrKey);
         LocalDate publishedDate = paperRepository.findPublishedDateById(paperId);
         List<ArticleSimpleDTO> articles = articleRepository.findArticlesByPaperId(paperId);
 
