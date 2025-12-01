@@ -60,7 +60,7 @@ jobs:
         chmod 600 /tmp/private_key
         
         # SSH 명령어로 배포
-        ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@qroadtest.duckdns.org "
+        ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@qroad.info "
         cd /home/ubuntu/BE &&
         git config --global --add safe.directory /home/ubuntu/BE &&
         git pull && 
