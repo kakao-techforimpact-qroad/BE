@@ -15,11 +15,11 @@ public class UserController {
 
     private final UserMainService userMainService;
 
-    @GetMapping("{qr_key}")
-    public ResponseEntity<UserMainDTO> getPagerByQrKey(@RequestParam("qr_key") String qrKey){
-        log.info("in UserController: getPagerByQrKey");
+    @GetMapping("{paperId}")
+    public ResponseEntity<UserMainDTO> getPagerByPaperId(@RequestParam("paper_id") Long paperId){
+        log.info("in UserController: getPagerByPaperId");
 
-        UserMainDTO userMainDTO = userMainService.getPagerByQrKey(qrKey);
+        UserMainDTO userMainDTO = userMainService.getPagerById(paperId);
         return ResponseEntity.ok(userMainDTO);
     }
 
