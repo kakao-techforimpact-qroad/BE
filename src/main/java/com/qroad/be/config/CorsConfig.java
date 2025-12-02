@@ -9,7 +9,8 @@ public class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOrigins("https://qroad.info", "https://www.qroad.info")
+                .allowedOrigins("https://qroad.info", "https://www.qroad.info", "https://www.api.qroad.info",
+                        "https://api.qroad.info")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH")
                 .allowedHeaders("*")
                 .allowCredentials(true);
