@@ -94,6 +94,30 @@ public class LlmService {
             int end = (i + 1 < splitPositions.size()) ? splitPositions.get(i + 1) : paperContent.length();
 
             String articleContent = paperContent.substring(start, end).trim();
+
+            // 마지막 청크인 경우, 기자명 패턴으로 끝나는지 확인
+            if (i == splitPositions.size() - 1 && i > 0) {
+                // 마지막 청크가 기자명 패턴으로 끝나지 않으면 버림
+                java.util.regex.Matcher endMatcher = reporterPattern.matcher(articleContent);
+                boolean endsWithReporter = false;
+                int lastMatchEnd = -1;
+
+                while (endMatcher.find()) {
+                    lastMatchEnd = endMatcher.end();
+                }
+
+                // 마지막 매칭 위치가 청크 끝 부분(여백 고려하여 10자 이내)이면 유효한 기사로 간주
+                if (lastMatchEnd > 0 && articleContent.length() - lastMatchEnd <= 10) {
+                    endsWithReporter = true;
+                }
+
+                if (!endsWithReporter) {
+                    log.info("마지막 청크가 기자명으로 끝나지 않아 제외합니다: {}",
+                            articleContent.length() > 50 ? articleContent.substring(0, 50) + "..." : articleContent);
+                    continue;
+                }
+            }
+
             if (!articleContent.isEmpty()) {
                 articles.add(articleContent);
             }
