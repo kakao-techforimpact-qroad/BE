@@ -212,17 +212,24 @@ public class PaperService {
                         }
 
                         // 임베딩 생성 및 저장
-                        try {
-                                List<Double> embedding = llmService.getEmbedding(chunk.getContent());
-                                String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
-
-                                String sql = "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)";
-                                jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
-                                                savedPaper.getPublishedDate(), vectorString);
-                                log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
-                        } catch (Exception e) {
-                                log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
-                        }
+                        // 주석: 발행 API로 생성된 기사는 vector_articles에 저장하지 않음
+                        // 이유: link 컬럼이 없어서 다른 기사의 연관 기사로 매핑될 때 오류 발생
+                        // 발행 기사는 크롤링 기사를 연관 기사로 찾을 수 있지만, 역방향 매핑은 되지 않음
+                        /*
+                         * try {
+                         * List<Double> embedding = llmService.getEmbedding(chunk.getContent());
+                         * String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
+                         * 
+                         * String sql =
+                         * "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)"
+                         * ;
+                         * jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
+                         * savedPaper.getPublishedDate(), vectorString);
+                         * log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
+                         * } catch (Exception e) {
+                         * log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
+                         * }
+                         */
 
                         // 연관 기사 생성
                         updateRelatedArticles(savedArticle.getId(), savedKeywords);
