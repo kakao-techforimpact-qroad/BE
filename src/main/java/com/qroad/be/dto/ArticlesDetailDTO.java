@@ -21,6 +21,7 @@ public class ArticlesDetailDTO {
 
     private List<ArticleRelatedDTO> articleRelatedDTOS;
     private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;
+    private List<String> keywords;
 
     public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
                              String reporter, LocalDate publishedDate, String summary) {
