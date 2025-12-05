@@ -46,6 +46,10 @@ public class ArticleService {
             dto.setPolicyArticleRelatedDTOS(policyArticleRelatedDTOS);
         }
 
+        // 4. 키워드 추출 추가
+        List<String> keywords = articleRepository.findKeywordNamesByArticleId(articleId);
+        dto.setKeywords(keywords);
+
         return dto;
     }
 

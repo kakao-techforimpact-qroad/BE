@@ -39,5 +39,8 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     """)
     Optional<ArticlesDetailDTO> findArticleDetailById(@Param("id") Long id);
 
+    @Query("SELECT ak.keyword.name FROM ArticleKeywordEntity ak WHERE ak.article.id = :articleId")
+    List<String> findKeywordNamesByArticleId(Long articleId);
+
 }
 
