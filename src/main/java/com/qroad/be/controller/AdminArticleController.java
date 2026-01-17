@@ -18,30 +18,10 @@ public class AdminArticleController {
 
     private final PaperService paperService;
 
-    /**
-     * 세션 확인 메서드
-     */
-    private ResponseEntity<?> checkSession(HttpSession session) {
-        if (session == null || session.getAttribute("adminId") == null) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", "로그인이 필요합니다.");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
-        }
-        return null;
-    }
-
     @PostMapping("/{id}")
     public ResponseEntity<?> updateArticle(
             @PathVariable Long id,
-            @RequestBody ArticleUpdateRequestDTO request,
-            HttpSession session) {
-
-        // 세션 확인
-        ResponseEntity<?> sessionCheck = checkSession(session);
-        if (sessionCheck != null) {
-            return sessionCheck;
-        }
+            @RequestBody ArticleUpdateRequestDTO request) {
 
         com.qroad.be.dto.ArticleUpdateResponseDTO response = paperService.updateArticle(id, request);
         return ResponseEntity.ok(response);
