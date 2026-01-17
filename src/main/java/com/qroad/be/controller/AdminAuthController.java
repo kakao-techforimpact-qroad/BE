@@ -36,12 +36,6 @@ public class AdminAuthController {
         return ResponseEntity.ok(token);
     }
 
-    /*@PostMapping("/logout")
-    public ResponseEntity<String> logout(HttpSession session) {
-        session.invalidate();
-        return ResponseEntity.ok("로그아웃 완료");
-    }*/
-
     @PostMapping("/register")
     public ResponseEntity<String> createAdmin(@RequestBody AdminCreateRequestDTO req) {
 
