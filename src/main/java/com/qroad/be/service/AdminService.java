@@ -43,12 +43,4 @@ public class AdminService {
                 .orElse(null);
     }
 
-    private Long getAdminIdFromSession(HttpSession session) {
-        Long adminId = (Long) session.getAttribute("adminId");
-        if (adminId == null) {
-            throw new RuntimeException("세션 없음 → 로그인 필요");
-        }
-        return adminId;
-    }
-
 }

@@ -1,7 +1,10 @@
 package com.qroad.be.config;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,7 +25,18 @@ public class SwaggerConfig {
         localServer.setDescription("서버");
 
         return new OpenAPI()
-                .info(info)
-                .servers(List.of(localServer));
+            .info(info)
+            .servers(List.of(localServer))
+            .addSecurityItem(new SecurityRequirement().addList("JWT"))
+            .components(
+                new Components().addSecuritySchemes(
+                    "JWT",
+                    new SecurityScheme()
+                        .name("Authorization")
+                        .type(SecurityScheme.Type.HTTP)
+                        .scheme("bearer")
+                        .bearerFormat("JWT")
+                )
+            );
     }
 }
