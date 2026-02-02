@@ -5,7 +5,6 @@ import com.qroad.be.dto.PublicationListResponse;
 import com.qroad.be.dto.QrCodeResponse;
 import com.qroad.be.security.AdminPrincipal;
 import com.qroad.be.service.PaperService;
-import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
