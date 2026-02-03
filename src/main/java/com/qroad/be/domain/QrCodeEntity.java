@@ -6,7 +6,8 @@ import lombok.*;
 
 import java.time.ZonedDateTime;
 
-@Entity
+// 현재 데이터베이스에 qr_codes 테이블이 없으므로 비활성화
+// @Entity
 @Getter
 @Setter
 @NoArgsConstructor
@@ -43,4 +44,3 @@ public class QrCodeEntity extends BaseTimeEntity {
     @JoinColumn(name = "admin_id")
     private AdminEntity admin;
 }
-
