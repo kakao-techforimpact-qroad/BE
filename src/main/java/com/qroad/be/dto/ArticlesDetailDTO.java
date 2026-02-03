@@ -21,6 +21,7 @@ public class ArticlesDetailDTO {
 
     private List<ArticleRelatedDTO> articleRelatedDTOS;
     private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;
+    private List<String> keywords;
 
     // 감정 통계
     private EmotionStatsDTO emotionStats;

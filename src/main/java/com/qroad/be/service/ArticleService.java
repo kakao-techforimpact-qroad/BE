@@ -18,38 +18,42 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ArticleService {
 
-    private final ArticleRepository articleRepository;
-    private final ArticleRelatedRepository articleRelatedRepository;
-    private final ArticlePolicyRelatedRepository articlePolicyRelatedRepository;
-    private final ArticleEmotionService articleEmotionService;
+        private final ArticleRepository articleRepository;
+        private final ArticleRelatedRepository articleRelatedRepository;
+        private final ArticlePolicyRelatedRepository articlePolicyRelatedRepository;
+        private final ArticleEmotionService articleEmotionService;
 
-    public ArticlesDetailDTO getArticleDetail(Long articleId) {
+        public ArticlesDetailDTO getArticleDetail(Long articleId) {
 
-        // 1. 기본 article 정보 없으면 예외 발생
-        ArticlesDetailDTO dto = articleRepository.findArticleDetailById(articleId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "존재하지 않는 articleId = " + articleId));
+                // 1. 기본 article 정보 없으면 예외 발생
+                ArticlesDetailDTO dto = articleRepository.findArticleDetailById(articleId)
+                                .orElseThrow(() -> new IllegalArgumentException(
+                                                "존재하지 않는 articleId = " + articleId));
 
-        // 2. 관련 기사 리스트 추가
-        List<ArticleRelatedDTO> relatedArticles = articleRelatedRepository.findArticlesByArticleId(articleId);
+                // 2. 관련 기사 리스트 추가
+                List<ArticleRelatedDTO> relatedArticles = articleRelatedRepository.findArticlesByArticleId(articleId);
 
-        if (relatedArticles != null && !relatedArticles.isEmpty()) {
-            dto.setArticleRelatedDTOS(relatedArticles);
+                if (relatedArticles != null && !relatedArticles.isEmpty()) {
+                        dto.setArticleRelatedDTOS(relatedArticles);
+                }
+
+                // 3. 정책 키워드 관련 리스트 추가
+                List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS = articlePolicyRelatedRepository
+                                .findPoliciesByArticleId(articleId);
+
+                if (policyArticleRelatedDTOS != null && !policyArticleRelatedDTOS.isEmpty()) {
+                        dto.setPolicyArticleRelatedDTOS(policyArticleRelatedDTOS);
+                }
+
+                // 4. 감정 통계 추가
+                EmotionStatsDTO emotionStats = articleEmotionService.getEmotionStats(articleId);
+                dto.setEmotionStats(emotionStats);
+
+                // 5. 키워드 추출 추가
+                List<String> keywords = articleRepository.findKeywordNamesByArticleId(articleId);
+                dto.setKeywords(keywords);
+
+                return dto;
         }
-
-        // 3. 정책 키워드 관련 리스트 추가
-        List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS = articlePolicyRelatedRepository
-                .findPoliciesByArticleId(articleId);
-
-        if (policyArticleRelatedDTOS != null && !policyArticleRelatedDTOS.isEmpty()) {
-            dto.setPolicyArticleRelatedDTOS(policyArticleRelatedDTOS);
-        }
-
-        // 4. 감정 통계 추가
-        EmotionStatsDTO emotionStats = articleEmotionService.getEmotionStats(articleId);
-        dto.setEmotionStats(emotionStats);
-
-        return dto;
-    }
 
 }
