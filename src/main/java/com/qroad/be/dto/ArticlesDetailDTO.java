@@ -23,8 +23,11 @@ public class ArticlesDetailDTO {
     private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;
     private List<String> keywords;
 
+    // 감정 통계
+    private EmotionStatsDTO emotionStats;
+
     public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
-                             String reporter, LocalDate publishedDate, String summary) {
+            String reporter, LocalDate publishedDate, String summary) {
         this.articleId = articleId;
         this.title = title;
         this.pressCompany = pressCompany;
