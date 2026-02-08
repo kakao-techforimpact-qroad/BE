@@ -149,6 +149,7 @@ public class PaperService {
                 PaperEntity paper = PaperEntity.builder()
                                 .title(request.getTitle())
                                 .content(request.getContent())
+                                .filePath(request.getFilePath())
                                 .publishedDate(request.getPublishedDate())
                                 .status("ACTIVE")
                                 .admin(admin)

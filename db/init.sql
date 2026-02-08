@@ -19,6 +19,7 @@ CREATE TABLE papers (
     published_date DATE,
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
+    file_path VARCHAR(255) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'EXPIRED')),
     admin_id BIGINT REFERENCES admins(id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
