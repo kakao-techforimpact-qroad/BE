@@ -1,5 +1,7 @@
 package com.qroad.be.controller;
 
+import com.qroad.be.dto.FinalizeUploadRequest;
+import com.qroad.be.dto.FinalizeUploadResponse;
 import com.qroad.be.dto.PresignedUploadResponse;
 import com.qroad.be.security.AdminPrincipal;
 import com.qroad.be.service.S3PresignService;
@@ -8,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,6 +32,20 @@ public class UploadController {
         }
 
         PresignedUploadResponse response = s3PresignService.createPdfUploadUrl();
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/publications/finalize-file")
+    public ResponseEntity<?> finalizePaperFile(
+            @RequestBody FinalizeUploadRequest request,
+            @AuthenticationPrincipal AdminPrincipal admin) {
+        Long adminId = admin != null ? admin.getAdminId() : null;
+        if (adminId == null) {
+            return unauthorizedResponse();
+        }
+
+        FinalizeUploadResponse response = s3PresignService
+                .finalizePdfUpload(request.getTempKey(), request.getPublicationId());
         return ResponseEntity.ok(response);
     }
 
