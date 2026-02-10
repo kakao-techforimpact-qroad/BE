@@ -3,12 +3,12 @@ package com.qroad.be.service;
 import com.qroad.be.domain.PaperEntity;
 import com.qroad.be.domain.ArticleKeywordEntity;
 import com.qroad.be.domain.ArticleEntity;
-import com.qroad.be.domain.QrCodeEntity;
+// import com.qroad.be.domain.QrCodeEntity; // QR 코드 기능 비활성화
 import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.dto.*;
 import com.qroad.be.repository.ArticleRepository;
 import com.qroad.be.repository.PaperRepository;
-import com.qroad.be.repository.QrCodeRepository;
+// import com.qroad.be.repository.QrCodeRepository; // QR 코드 기능 비활성화
 import com.qroad.be.repository.ArticleKeywordRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +29,7 @@ public class PaperService {
 
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
-        private final QrCodeRepository qrCodeRepository;
+        // private final QrCodeRepository qrCodeRepository; // QR 코드 기능 비활성화
         private final ArticleKeywordRepository articleKeywordRepository;
         private final com.qroad.be.repository.KeywordRepository keywordRepository;
         private final com.qroad.be.repository.ArticleRelatedRepository articleRelatedRepository;
@@ -87,37 +87,39 @@ public class PaperService {
         }
 
         /**
-         * API 3: QR 발행
+         * API 3: QR 발행 (비활성화 - DB에 qr_codes 테이블 없음)
          */
-        @Transactional
-        public QrCodeResponse generateQrCode(Long paperId) {
-                PaperEntity paper = paperRepository.findById(paperId)
-                                .orElseThrow(() -> new RuntimeException("Paper not found"));
-
-                String qrKey = generateUniqueQrKey();
-                String targetUrl = "https://qroad.com/qr/" + qrKey; // 실제 도메인으로 변경 필요
-                String qrImageUrl = "https://qroad.com/qr/image/" + qrKey; // 예시 이미지 URL
-
-                QrCodeEntity qrCode = QrCodeEntity.builder()
-                                .paper(paper)
-                                .qrKey(qrKey)
-                                .targetUrl(targetUrl)
-                                .qrImageUrl(qrImageUrl)
-                                .status("ACTIVE")
-                                .build();
-
-                qrCodeRepository.save(qrCode);
-
-                return new QrCodeResponse(qrKey, qrImageUrl, targetUrl);
-        }
-
-        private String generateUniqueQrKey() {
-                String qrKey;
-                do {
-                        qrKey = UUID.randomUUID().toString().substring(0, 8);
-                } while (qrCodeRepository.existsByQrKey(qrKey));
-                return qrKey;
-        }
+        /*
+         * @Transactional
+         * public QrCodeResponse generateQrCode(Long paperId) {
+         * PaperEntity paper = paperRepository.findById(paperId)
+         * .orElseThrow(() -> new RuntimeException("Paper not found"));
+         * 
+         * String qrKey = generateUniqueQrKey();
+         * String targetUrl = "https://qroad.com/qr/" + qrKey; // 실제 도메인으로 변경 필요
+         * String qrImageUrl = "https://qroad.com/qr/image/" + qrKey; // 예시 이미지 URL
+         * 
+         * QrCodeEntity qrCode = QrCodeEntity.builder()
+         * .paper(paper)
+         * .qrKey(qrKey)
+         * .targetUrl(targetUrl)
+         * .qrImageUrl(qrImageUrl)
+         * .status("ACTIVE")
+         * .build();
+         * 
+         * qrCodeRepository.save(qrCode);
+         * 
+         * return new QrCodeResponse(qrKey, qrImageUrl, targetUrl);
+         * }
+         * 
+         * private String generateUniqueQrKey() {
+         * String qrKey;
+         * do {
+         * qrKey = UUID.randomUUID().toString().substring(0, 8);
+         * } while (qrCodeRepository.existsByQrKey(qrKey));
+         * return qrKey;
+         * }
+         */
 
         /**
          * 신문 지면 생성 및 기사 청킹/분석
@@ -147,6 +149,7 @@ public class PaperService {
                 PaperEntity paper = PaperEntity.builder()
                                 .title(request.getTitle())
                                 .content(request.getContent())
+                                .filePath(request.getFilePath())
                                 .publishedDate(request.getPublishedDate())
                                 .status("ACTIVE")
                                 .admin(admin)

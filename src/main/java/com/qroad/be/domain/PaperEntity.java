@@ -28,6 +28,9 @@ public class PaperEntity extends BaseTimeEntity {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "file_path", nullable = false)
+    private String filePath;
+
     @Column(nullable = false, length = 10)
     @Builder.Default
     private String status = "ACTIVE";

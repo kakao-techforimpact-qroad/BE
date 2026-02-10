@@ -5,7 +5,6 @@ import com.qroad.be.dto.PublicationListResponse;
 import com.qroad.be.dto.QrCodeResponse;
 import com.qroad.be.security.AdminPrincipal;
 import com.qroad.be.service.PaperService;
-import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,13 +39,14 @@ public class PaperController {
         return ResponseEntity.ok(response);
     }
 
-    //인증 실패 응답
+    // 인증 실패 응답
     private ResponseEntity<?> unauthorizedResponse() {
         Map<String, Object> errorResponse = new HashMap<>();
         errorResponse.put("success", false);
         errorResponse.put("message", "로그인이 필요합니다");
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
     }
+
     /**
      * API 2: 발행 상세 조회
      */
@@ -58,15 +58,18 @@ public class PaperController {
     }
 
     /**
-     * API 3: QR 발행
+     * API 3: QR 발행 (비활성화 - DB에 qr_codes 테이블 없음)
      */
-    @PostMapping("/qr/{paperId}")
-    public ResponseEntity<?> generateQrCode(
-            @PathVariable Long paperId) {
-
-        QrCodeResponse response = paperService.generateQrCode(paperId);
-        return ResponseEntity.ok(response);
-    }
+    /*
+     * @PostMapping("/qr/{paperId}")
+     * public ResponseEntity<?> generateQrCode(
+     * 
+     * @PathVariable Long paperId) {
+     * 
+     * QrCodeResponse response = paperService.generateQrCode(paperId);
+     * return ResponseEntity.ok(response);
+     * }
+     */
 
     /**
      * API 4: 신문 지면 생성 (GPT 기반 기사 청킹 및 분석)

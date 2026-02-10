@@ -14,6 +14,9 @@ jobs:
       DB_USERNAME: ${{ secrets.DB_USERNAME }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_S3_PRESIGN_EXP_MINUTES: ${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}
     steps:
 
     - name: Clean up disk
@@ -68,6 +71,9 @@ jobs:
         export DB_USERNAME='${{ secrets.DB_USERNAME }}' && 
         export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && 
         export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' &&
+        export AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' && 
+        export AWS_REGION='${{ secrets.AWS_REGION }}' && 
+        export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' && 
         ./deploy.sh"
 
     # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거

@@ -5,6 +5,9 @@ out/
 *.ipr
 *.iws
 
+### VS Code ###
+.vscode/
+
 ### Gradle ###
 .gradle/
 build/
