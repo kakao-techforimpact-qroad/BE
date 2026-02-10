@@ -14,5 +14,6 @@ import java.time.LocalDate;
 public class PaperCreateRequestDTO {
     private String title;
     private String content;
+    private String filePath;
     private LocalDate publishedDate;
 }
