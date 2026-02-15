@@ -5,6 +5,10 @@ import lombok.RequiredArgsConstructor;
 
 @Getter
 @RequiredArgsConstructor
+/**
+ * 신문 발행 비동기 작업의 진행 단계 정의.
+ * progress는 프론트 polling UI에 그대로 전달되는 기준 값이다.
+ */
 public enum PublicationStep {
     PDF_UPLOADING(5, "PDF 업로드 중,,,"),
     PDF_READING(10, "PDF 읽는 중,,,"),

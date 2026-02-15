@@ -35,7 +35,7 @@ public class PaperController {
     private final PublicationJobService publicationJobService;
 
     /**
-     * API 1: 발행된 신문 리스트 조회
+     * 발행된 신문 목록 조회 API.
      */
     @GetMapping("/publications")
     public ResponseEntity<?> getPublications(
@@ -53,7 +53,7 @@ public class PaperController {
     }
 
     /**
-     * API 2: 발행 상세 조회
+     * 단건 발행 상세 조회 API.
      */
     @GetMapping("/publications/{paperId}")
     public ResponseEntity<?> getPublicationDetail(@PathVariable Long paperId) {
@@ -62,7 +62,8 @@ public class PaperController {
     }
 
     /**
-     * API 3: 퍼센테이지 비동기 API 시작 및 신문 지면 생성 (GPT 기반 기사 청킹 및 분석)
+     * 발행 비동기 작업 시작 API.
+     * 요청 즉시 jobId를 반환하고 실제 생성은 백그라운드에서 수행한다.
      */
     @PostMapping("/publications")
     public ResponseEntity<?> startPublicationJob(
@@ -79,7 +80,8 @@ public class PaperController {
     }
 
     /**
-     * API 4: 프론트에서 현재 상태 계속 호출
+     * 발행 비동기 작업 진행률 조회 API.
+     * 프론트는 DONE/FAILED까지 polling한다.
      */
     @GetMapping("/publications/{jobId}/progress")
     public ResponseEntity<?> getPublicationProgress(

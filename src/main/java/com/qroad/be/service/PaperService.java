@@ -141,6 +141,10 @@ public class PaperService {
                 return createPaperWithArticles(request, adminId, null);
         }
 
+        /**
+         * jobId가 전달되면 단계별 진행률을 함께 기록한다.
+         * 기존 동기 호출 호환을 위해 jobId는 nullable로 유지한다.
+         */
         @Transactional
         public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
                         com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId, String jobId) {
@@ -277,6 +281,9 @@ public class PaperService {
                                 .build();
         }
 
+        /**
+         * 비동기 작업에서만 진행률을 갱신한다.
+         */
         private void moveTo(String jobId, PublicationStep step) {
                 if (jobId == null) {
                         return;
