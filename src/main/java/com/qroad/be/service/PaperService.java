@@ -172,7 +172,7 @@ public class PaperService {
                 PaperEntity savedPaper = paperRepository.save(paper);
                 log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
-                moveTo(jobId, PublicationStep.CHUNKING);
+                moveTo(jobId, PublicationStep.CHUNKING_AND_ANALYZING);
                 // 2. GPT로 기사 청킹 및 분석
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks;
                 if (jobId != null) {
@@ -183,13 +183,13 @@ public class PaperService {
                 } else {
                         articleChunks = llmService.chunkAndAnalyzePaper(request.getContent());
                 }
-                moveTo(jobId, PublicationStep.SUMMARIZING);
+                moveTo(jobId, PublicationStep.ANALYSIS_FINALIZING);
 
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 // 3. 각 기사 저장 및 키워드 매핑 + 응답 데이터 수집
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
-                moveTo(jobId, PublicationStep.KEYWORD_EXTRACTING);
+                moveTo(jobId, PublicationStep.KEYWORD_MAPPING);
 
                 for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
                         // Article 저장

@@ -58,11 +58,11 @@ public class PublicationProgressStore {
         }
 
         int boundedProcessed = Math.max(0, Math.min(processed, total));
-        int start = PublicationStep.CHUNKING.getProgress();
-        int end = PublicationStep.SUMMARIZING.getProgress();
+        int start = PublicationStep.CHUNKING_AND_ANALYZING.getProgress();
+        int end = PublicationStep.ANALYSIS_FINALIZING.getProgress();
         int range = Math.max(1, end - start);
         int progress = start + (boundedProcessed * (range - 1)) / total;
-        String message = "기사 청킹 중... (" + boundedProcessed + "/" + total + ")";
+        String message = "기사 분리 및 분석 중,,, (" + boundedProcessed + "/" + total + ")";
 
         progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
                 .status(PublicationJobStatus.PROCESSING)
