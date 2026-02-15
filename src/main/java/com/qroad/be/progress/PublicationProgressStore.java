@@ -52,6 +52,27 @@ public class PublicationProgressStore {
         }
     }
 
+    public void updateChunkingProgress(String jobId, int processed, int total) {
+        if (total <= 0) {
+            return;
+        }
+
+        int boundedProcessed = Math.max(0, Math.min(processed, total));
+        int start = PublicationStep.CHUNKING.getProgress();
+        int end = PublicationStep.SUMMARIZING.getProgress();
+        int range = Math.max(1, end - start);
+        int progress = start + (boundedProcessed * (range - 1)) / total;
+        String message = "기사 청킹 중... (" + boundedProcessed + "/" + total + ")";
+
+        progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
+                .status(PublicationJobStatus.PROCESSING)
+                .progress(progress)
+                .message(message)
+                .paperId(existing.getPaperId())
+                .timestamp(Instant.now())
+                .build());
+    }
+
     public void markFailed(String jobId, String errorMessage) {
         progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
                 .status(PublicationJobStatus.FAILED)

@@ -174,8 +174,15 @@ public class PaperService {
 
                 moveTo(jobId, PublicationStep.CHUNKING);
                 // 2. GPT로 기사 청킹 및 분석
-                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = llmService
-                                .chunkAndAnalyzePaper(request.getContent());
+                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks;
+                if (jobId != null) {
+                        articleChunks = llmService.chunkAndAnalyzePaper(
+                                        request.getContent(),
+                                        (processed, total) -> publicationProgressStore
+                                                        .updateChunkingProgress(jobId, processed, total));
+                } else {
+                        articleChunks = llmService.chunkAndAnalyzePaper(request.getContent());
+                }
                 moveTo(jobId, PublicationStep.SUMMARIZING);
 
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 
 @Slf4j
 @Service
@@ -30,6 +31,20 @@ public class LlmService {
      * @return 청킹된 기사 리스트 (제목, 내용, 기자명, 요약문, 키워드)
      */
     public List<ArticleChunkDTO> chunkAndAnalyzePaper(String paperContent) {
+        return chunkAndAnalyzePaper(paperContent, null);
+    }
+
+    /**
+     * 신문 지면 전체 내용을 기사 단위로 청킹하고, 각 기사의 메타데이터와 요약문, 키워드를 추출합니다.
+     *
+     * @param paperContent      신문 지면 원문 전체
+     * @param progressCallback  처리 기사 수/전체 기사 수를 전달하는 콜백 (nullable)
+     * @return 청킹된 기사 리스트 (제목, 내용, 기자명, 요약문, 키워드)
+     */
+    public List<ArticleChunkDTO> chunkAndAnalyzePaper(
+            String paperContent,
+            BiConsumer<Integer, Integer> progressCallback
+    ) {
         try {
             log.info("신문 지면 청킹 및 분석 시작");
 
@@ -40,7 +55,9 @@ public class LlmService {
 
             // 2단계: 각 기사별로 LLM을 사용하여 제목, 기자명, 요약문, 키워드 추출
             List<ArticleChunkDTO> articles = new ArrayList<>();
-            for (String articleContent : rawArticleContents) {
+            int total = rawArticleContents.size();
+            for (int i = 0; i < total; i++) {
+                String articleContent = rawArticleContents.get(i);
                 // LLM으로 메타데이터 및 분석 정보 추출
                 ArticleAnalysisResult analysis = analyzeArticleWithMetadata(articleContent);
 
@@ -53,6 +70,9 @@ public class LlmService {
                         .build();
 
                 articles.add(article);
+                if (progressCallback != null) {
+                    progressCallback.accept(i + 1, total);
+                }
             }
 
             log.info("총 {}개의 기사 분석 완료", articles.size());
