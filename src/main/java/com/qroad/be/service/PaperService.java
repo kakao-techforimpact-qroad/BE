@@ -6,6 +6,8 @@ import com.qroad.be.domain.ArticleEntity;
 // import com.qroad.be.domain.QrCodeEntity; // QR 코드 기능 비활성화
 import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.dto.*;
+import com.qroad.be.progress.PublicationProgressStore;
+import com.qroad.be.progress.PublicationStep;
 import com.qroad.be.repository.ArticleRepository;
 import com.qroad.be.repository.PaperRepository;
 // import com.qroad.be.repository.QrCodeRepository; // QR 코드 기능 비활성화
@@ -37,6 +39,7 @@ public class PaperService {
         private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
         private final com.qroad.be.repository.PolicyRepository policyRepository;
         private final com.qroad.be.repository.PolicyArticleRelatedRepository policyArticleRelatedRepository;
+        private final PublicationProgressStore publicationProgressStore;
 
         /**
          * API 1: 발행된 신문 리스트 조회
@@ -135,8 +138,19 @@ public class PaperService {
         @Transactional
         public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
                         com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId) {
+                return createPaperWithArticles(request, adminId, null);
+        }
+
+        /**
+         * jobId가 전달되면 단계별 진행률을 함께 기록한다.
+         * 기존 동기 호출 호환을 위해 jobId는 nullable로 유지한다.
+         */
+        @Transactional
+        public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
+                        com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId, String jobId) {
                 log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
                                 request.getTitle(), request.getPublishedDate(), adminId);
+                moveTo(jobId, PublicationStep.PDF_READING);
 
                 // Admin 조회
                 AdminEntity admin = null;
@@ -158,14 +172,17 @@ public class PaperService {
                 PaperEntity savedPaper = paperRepository.save(paper);
                 log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
+                moveTo(jobId, PublicationStep.CHUNKING);
                 // 2. GPT로 기사 청킹 및 분석
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = llmService
                                 .chunkAndAnalyzePaper(request.getContent());
+                moveTo(jobId, PublicationStep.SUMMARIZING);
 
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 // 3. 각 기사 저장 및 키워드 매핑 + 응답 데이터 수집
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
+                moveTo(jobId, PublicationStep.KEYWORD_EXTRACTING);
 
                 for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
                         // Article 저장
@@ -234,6 +251,7 @@ public class PaperService {
                          * }
                          */
 
+                        moveTo(jobId, PublicationStep.FINDING_RELATED);
                         // 연관 기사 생성
                         updateRelatedArticles(savedArticle.getId(), savedKeywords);
                         // 연관 정책 생성
@@ -251,6 +269,7 @@ public class PaperService {
                         articleResponses.add(articleResponse);
                 }
 
+                moveTo(jobId, PublicationStep.SAVING);
                 log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
                                 savedPaper.getId(), articleChunks.size(), adminId);
 
@@ -260,6 +279,16 @@ public class PaperService {
                                 .articleCount(articleResponses.size())
                                 .articles(articleResponses)
                                 .build();
+        }
+
+        /**
+         * 비동기 작업에서만 진행률을 갱신한다.
+         */
+        private void moveTo(String jobId, PublicationStep step) {
+                if (jobId == null) {
+                        return;
+                }
+                publicationProgressStore.moveTo(jobId, step);
         }
 
         /**

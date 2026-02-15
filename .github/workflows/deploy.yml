@@ -74,6 +74,7 @@ jobs:
         export AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' && 
         export AWS_REGION='${{ secrets.AWS_REGION }}' && 
         export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' && 
+        export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
         ./deploy.sh"
 
     # 5. 배포가 끝난 후 GitHub Actions의 IP를 보안 그룹에서 제거
