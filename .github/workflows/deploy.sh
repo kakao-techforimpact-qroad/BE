@@ -2,6 +2,7 @@
 APP_NAME="be-0.0.1-SNAPSHOT.jar"
 APP_PATH="/home/ubuntu/BE/build/libs/$APP_NAME"
 LOG_PATH="/var/log/be/be.log"
+SPRING_AUTOCONFIGURE_EXCLUDE="org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration"
 
 # 0. 로그 디렉토리 생성 (없으면)
 sudo mkdir -p /var/log/be
@@ -26,6 +27,7 @@ echo "[3/4] Building..."
 ./gradlew clean build -x test
 
 echo "[4/4] Starting application..."
+export SPRING_AUTOCONFIGURE_EXCLUDE
 nohup java -jar $APP_PATH >> $LOG_PATH 2>&1 &
 
 echo "Deployment complete!"

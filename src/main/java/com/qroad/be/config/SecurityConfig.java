@@ -61,6 +61,7 @@ public class SecurityConfig {
 
         config.setAllowedOrigins(List.of(
                 "http://localhost:3000",
+                "http://localhost:8080",
                 "https://qroad.info",
                 "https://www.qroad.info",
                 "https://api.qroad.info",
