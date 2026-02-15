@@ -43,6 +43,7 @@ public class PublicationProgressStore {
                 .status(status)
                 .progress(step.getProgress())
                 .message(step.getMessage())
+                .paperId(existing != null ? existing.getPaperId() : null)
                 .timestamp(Instant.now())
                 .build());
 
@@ -56,6 +57,19 @@ public class PublicationProgressStore {
                 .status(PublicationJobStatus.FAILED)
                 .progress(existing.getProgress())
                 .message(errorMessage)
+                .paperId(existing.getPaperId())
+                .timestamp(Instant.now())
+                .build());
+
+        scheduleRemoval(jobId);
+    }
+
+    public void markDone(String jobId, Long paperId) {
+        progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
+                .status(PublicationJobStatus.DONE)
+                .progress(PublicationStep.DONE.getProgress())
+                .message(PublicationStep.DONE.getMessage())
+                .paperId(paperId)
                 .timestamp(Instant.now())
                 .build());
 

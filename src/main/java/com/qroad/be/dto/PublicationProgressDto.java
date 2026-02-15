@@ -16,5 +16,6 @@ public class PublicationProgressDto {
     private PublicationJobStatus status;
     private int progress;
     private String message;
+    private Long paperId;
     private Instant timestamp;
 }
