@@ -36,6 +36,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 인증 없이 허용
                         .requestMatchers(
+                                "/actuator/**",
                                 "/api/admin/login",
                                 "/api/admin/register",
                                 "/swagger-ui/**",
