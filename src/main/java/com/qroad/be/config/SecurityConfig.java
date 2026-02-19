@@ -13,6 +13,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import org.springframework.http.HttpMethod;
 import java.util.List;
 
 @Configuration
@@ -44,6 +45,8 @@ public class SecurityConfig {
                                 "/api/qr/**",
                                 "/api/articles/**"
                         ).permitAll()
+                        // 제보 등록은 인증 없이 허용 (POST만)
+                        .requestMatchers(HttpMethod.POST, "/api/reports").permitAll()
                         // 그 외는 인증 필요
                         .anyRequest().authenticated()
                 )
