@@ -13,7 +13,6 @@ import java.time.LocalDate;
 @AllArgsConstructor
 public class PaperCreateRequestDTO {
     private String title;
-    private String content;
-    private String filePath;
+    private String tempKey; // "temp/{uuid}.pdf" — S3 임시 키
     private LocalDate publishedDate;
 }
