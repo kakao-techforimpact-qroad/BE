@@ -6,6 +6,7 @@ import com.qroad.be.domain.ArticleEntity;
 // import com.qroad.be.domain.QrCodeEntity; // QR 코드 기능 비활성화
 import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.dto.*;
+import com.qroad.be.pdf.PdfExtractorService;
 import com.qroad.be.progress.PublicationProgressStore;
 import com.qroad.be.progress.PublicationStep;
 import com.qroad.be.repository.ArticleRepository;
@@ -40,6 +41,8 @@ public class PaperService {
         private final com.qroad.be.repository.PolicyRepository policyRepository;
         private final com.qroad.be.repository.PolicyArticleRelatedRepository policyArticleRelatedRepository;
         private final PublicationProgressStore publicationProgressStore;
+        private final S3PresignService s3PresignService;
+        private final PdfExtractorService pdfExtractorService;
 
         /**
          * API 1: 발행된 신문 리스트 조회
@@ -152,6 +155,16 @@ public class PaperService {
                                 request.getTitle(), request.getPublishedDate(), adminId);
                 moveTo(jobId, PublicationStep.PDF_READING);
 
+                // S3에서 PDF 읽기 → 텍스트 추출
+                String content;
+                try {
+                        byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
+                        content = pdfExtractorService.extractText(pdfBytes);
+                        log.info("PDF 텍스트 추출 완료: tempKey={}, length={}", request.getTempKey(), content.length());
+                } catch (Exception e) {
+                        throw new RuntimeException("PDF 텍스트 추출 실패: " + request.getTempKey(), e);
+                }
+
                 // Admin 조회
                 AdminEntity admin = null;
                 if (adminId != null) {
@@ -159,11 +172,11 @@ public class PaperService {
                         admin.setId(adminId);
                 }
 
-                // 1. Paper 저장
+                // 1. Paper 저장 (filePath는 finalize 후 updateFilePath로 갱신됨)
                 PaperEntity paper = PaperEntity.builder()
                                 .title(request.getTitle())
-                                .content(request.getContent())
-                                .filePath(request.getFilePath())
+                                .content(content)
+                                .filePath(request.getTempKey()) // 임시값; finalize 후 덮어씀
                                 .publishedDate(request.getPublishedDate())
                                 .status("ACTIVE")
                                 .admin(admin)
@@ -177,11 +190,11 @@ public class PaperService {
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks;
                 if (jobId != null) {
                         articleChunks = llmService.chunkAndAnalyzePaper(
-                                        request.getContent(),
+                                        content,
                                         (processed, total) -> publicationProgressStore
                                                         .updateChunkingProgress(jobId, processed, total));
                 } else {
-                        articleChunks = llmService.chunkAndAnalyzePaper(request.getContent());
+                        articleChunks = llmService.chunkAndAnalyzePaper(content);
                 }
                 moveTo(jobId, PublicationStep.ANALYSIS_FINALIZING);
 
@@ -486,5 +499,16 @@ public class PaperService {
                                 .summary(savedArticle.getSummary())
                                 .keywords(currentKeywords)
                                 .build();
+        }
+
+        /**
+         * finalize 완료 후 DB의 file_path 갱신
+         */
+        @Transactional
+        public void updateFilePath(Long paperId, String filePath) {
+                PaperEntity paper = paperRepository.findById(paperId)
+                                .orElseThrow(() -> new RuntimeException("Paper not found: " + paperId));
+                paper.setFilePath(filePath);
+                log.info("filePath 갱신 완료: paperId={}, filePath={}", paperId, filePath);
         }
 }

@@ -4,42 +4,44 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.Date;
 
 @Component
 public class JwtProvider {
 
-    // ✅ HS256용 시크릿 키 (32바이트 이상 필수)
-    private static final String SECRET =
-            "jwt-secret-key-jwt-secret-key-jwt-secret-key";
+    private final Key key;
 
-    private final Key key = Keys.hmacShaKeyFor(SECRET.getBytes());
-
-    // 토큰 유효시간 (1시간)
+    // token expiry (1 hour)
     private static final long EXPIRE_TIME = 1000 * 60 * 60;
 
-    /**
-     * 토큰 생성
-     */
+    @Autowired
+    public JwtProvider(@Value("${jwt.secret}") String secret) {
+        byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (secretBytes.length < 32) {
+            throw new IllegalArgumentException("JWT secret must be at least 32 bytes for HS256");
+        }
+        this.key = Keys.hmacShaKeyFor(secretBytes);
+    }
+
     public String createToken(Long adminId, String loginId) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + EXPIRE_TIME);
 
         return Jwts.builder()
-                .setSubject(adminId.toString())   // 핵심 식별자
-                .claim("loginId", loginId)        // 부가 정보
+                .setSubject(adminId.toString())
+                .claim("loginId", loginId)
                 .setIssuedAt(now)
                 .setExpiration(expiry)
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    /**
-     * 토큰 검증
-     */
     public boolean validate(String token) {
         try {
             Jwts.parserBuilder()
@@ -52,7 +54,6 @@ public class JwtProvider {
         }
     }
 
-    // 3. 관리자 ID 추출
     public Long getAdminId(String token) {
         return Long.parseLong(
                 Jwts.parserBuilder()
@@ -64,7 +65,6 @@ public class JwtProvider {
         );
     }
 
-    // 4. 로그인 ID 추출
     public String getLoginId(String token) {
         return (String)
                 Jwts.parserBuilder()
