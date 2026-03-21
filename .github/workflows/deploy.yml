@@ -17,6 +17,7 @@ jobs:
       AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       AWS_S3_PRESIGN_EXP_MINUTES: ${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
     steps:
 
     - name: Clean up disk
@@ -74,6 +75,7 @@ jobs:
         export AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' && 
         export AWS_REGION='${{ secrets.AWS_REGION }}' && 
         export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' && 
+        export JWT_SECRET='${{ secrets.JWT_SECRET }}' && 
         export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
         ./deploy.sh"
 
