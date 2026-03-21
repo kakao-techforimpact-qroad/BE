@@ -2,7 +2,6 @@ package com.qroad.be.controller;
 
 import com.qroad.be.dto.EmotionRequestDTO;
 import com.qroad.be.dto.EmotionResponseDTO;
-import com.qroad.be.dto.EmotionStatsDTO;
 import com.qroad.be.service.ArticleEmotionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -39,20 +38,6 @@ public class ArticleEmotionController {
                 userIdentifier);
 
         return ResponseEntity.ok(response);
-    }
-
-    /**
-     * 기사별 감정 통계 조회
-     * GET /api/articles/{articleId}/emotions/stats
-     */
-    @GetMapping("/stats")
-    public ResponseEntity<EmotionStatsDTO> getEmotionStats(
-            @PathVariable("articleId") Long articleId) {
-        log.info("감정 통계 조회 API 호출 - articleId: {}", articleId);
-
-        EmotionStatsDTO stats = articleEmotionService.getEmotionStats(articleId);
-
-        return ResponseEntity.ok(stats);
     }
 
     /**
