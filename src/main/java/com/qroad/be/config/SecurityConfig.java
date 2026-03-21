@@ -2,6 +2,7 @@ package com.qroad.be.config;
 
 import com.qroad.be.security.JwtAuthenticationFilter;
 import com.qroad.be.security.JwtProvider;
+import com.qroad.be.security.UserUuidCookieFilter;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
+    private final UserUuidCookieFilter userUuidCookieFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -50,6 +52,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/reports").permitAll()
                         // 그 외는 인증 필요
                         .anyRequest().authenticated()
+                )
+                .addFilterBefore(
+                        userUuidCookieFilter,
+                        org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class
                 )
                 .addFilterBefore(
                         new JwtAuthenticationFilter(jwtProvider),
