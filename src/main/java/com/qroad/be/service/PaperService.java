@@ -22,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -153,26 +155,24 @@ public class PaperService {
                         com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId, String jobId) {
                 log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
                                 request.getTitle(), request.getPublishedDate(), adminId);
-                moveTo(jobId, PublicationStep.PDF_READING);
 
-                // S3에서 PDF 읽기 → 텍스트 추출
-                String content;
-                try {
-                        byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
-                        content = pdfExtractorService.extractText(pdfBytes);
-                        log.info("PDF 텍스트 추출 완료: tempKey={}, length={}", request.getTempKey(), content.length());
-                } catch (Exception e) {
-                        throw new RuntimeException("PDF 텍스트 추출 실패: " + request.getTempKey(), e);
-                }
+                String content = runInStep(jobId, PublicationStep.PDF_READING, () -> {
+                        try {
+                                byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
+                                String extracted = pdfExtractorService.extractText(pdfBytes);
+                                log.info("PDF 텍스트 추출 완료: tempKey={}, length={}", request.getTempKey(), extracted.length());
+                                return extracted;
+                        } catch (Exception e) {
+                                throw new RuntimeException("PDF 텍스트 추출 실패: " + request.getTempKey(), e);
+                        }
+                });
 
-                // Admin 조회
                 AdminEntity admin = null;
                 if (adminId != null) {
                         admin = new AdminEntity();
                         admin.setId(adminId);
                 }
 
-                // 1. Paper 저장 (filePath는 finalize 후 updateFilePath로 갱신됨)
                 PaperEntity paper = PaperEntity.builder()
                                 .title(request.getTitle())
                                 .content(content)
@@ -185,115 +185,122 @@ public class PaperService {
                 PaperEntity savedPaper = paperRepository.save(paper);
                 log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
-                moveTo(jobId, PublicationStep.CHUNKING_AND_ANALYZING);
-                // 2. GPT로 기사 청킹 및 분석
-                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks;
-                if (jobId != null) {
-                        articleChunks = llmService.chunkAndAnalyzePaper(
-                                        content,
-                                        (processed, total) -> publicationProgressStore
-                                                        .updateChunkingProgress(jobId, processed, total));
-                } else {
-                        articleChunks = llmService.chunkAndAnalyzePaper(content);
-                }
-                moveTo(jobId, PublicationStep.ANALYSIS_FINALIZING);
+                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
+                                jobId,
+                                PublicationStep.CHUNKING_AND_ANALYZING,
+                                () -> {
+                                        if (jobId != null) {
+                                                return llmService.chunkAndAnalyzePaper(
+                                                                content,
+                                                                (processed, total) -> publicationProgressStore
+                                                                                .updateChunkingProgress(jobId, processed, total));
+                                        }
+                                        return llmService.chunkAndAnalyzePaper(content);
+                                });
 
+                runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
+                });
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
-                // 3. 각 기사 저장 및 키워드 매핑 + 응답 데이터 수집
+                final AdminEntity finalAdmin = admin;
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
-                moveTo(jobId, PublicationStep.KEYWORD_MAPPING);
+                final int totalChunks = articleChunks.size();
+                AtomicInteger relatedProcessed = new AtomicInteger(0);
 
-                for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
-                        // Article 저장
-                        ArticleEntity article = ArticleEntity.builder()
-                                        .title(chunk.getTitle())
-                                        .content(chunk.getContent())
-                                        .summary(chunk.getSummary())
-                                        .reporter(chunk.getReporter())
-                                        .link("") // 기본값
-                                        .status("ACTIVE")
-                                        .paper(savedPaper)
-                                        .admin(admin)
-                                        .build();
-
-                        ArticleEntity savedArticle = articleRepository.save(article);
-                        log.info("Article 저장 완료: id={}, title={}, adminId={}",
-                                        savedArticle.getId(), savedArticle.getTitle(), adminId);
-
-                        // 키워드 저장 및 매핑
-                        List<String> savedKeywords = new ArrayList<>();
-                        for (String keywordName : chunk.getKeywords()) {
-                                if (keywordName == null || keywordName.trim().isEmpty()) {
-                                        continue;
-                                }
-
-                                // 키워드 존재 여부 확인 후 저장
-                                com.qroad.be.domain.KeywordEntity keyword = keywordRepository
-                                                .findByName(keywordName.trim())
-                                                .orElseGet(() -> {
-                                                        com.qroad.be.domain.KeywordEntity newKeyword = com.qroad.be.domain.KeywordEntity
-                                                                        .builder()
-                                                                        .name(keywordName.trim())
-                                                                        .build();
-                                                        return keywordRepository.save(newKeyword);
-                                                });
-
-                                // ArticleKeyword 매핑
-                                ArticleKeywordEntity articleKeyword = ArticleKeywordEntity.builder()
-                                                .article(savedArticle)
-                                                .keyword(keyword)
+                runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
+                        for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                                ArticleEntity article = ArticleEntity.builder()
+                                                .title(chunk.getTitle())
+                                                .content(chunk.getContent())
+                                                .summary(chunk.getSummary())
+                                                .reporter(chunk.getReporter())
+                                                .link("") // 기본값
+                                                .status("ACTIVE")
+                                                .paper(savedPaper)
+                                                .admin(finalAdmin)
                                                 .build();
 
-                                articleKeywordRepository.save(articleKeyword);
-                                savedKeywords.add(keywordName.trim());
-                                log.info("ArticleKeyword 매핑 완료: articleId={}, keyword={}",
-                                                savedArticle.getId(), keywordName);
+                                ArticleEntity savedArticle = articleRepository.save(article);
+                                log.info("Article 저장 완료: id={}, title={}, adminId={}",
+                                                savedArticle.getId(), savedArticle.getTitle(), adminId);
+
+                                List<String> savedKeywords = new ArrayList<>();
+                                for (String keywordName : chunk.getKeywords()) {
+                                        if (keywordName == null || keywordName.trim().isEmpty()) {
+                                                continue;
+                                        }
+
+                                        // 키워드 존재 여부 확인 후 저장
+                                        com.qroad.be.domain.KeywordEntity keyword = keywordRepository
+                                                        .findByName(keywordName.trim())
+                                                        .orElseGet(() -> {
+                                                                com.qroad.be.domain.KeywordEntity newKeyword = com.qroad.be.domain.KeywordEntity
+                                                                                .builder()
+                                                                                .name(keywordName.trim())
+                                                                                .build();
+                                                                return keywordRepository.save(newKeyword);
+                                                        });
+
+                                        ArticleKeywordEntity articleKeyword = ArticleKeywordEntity.builder()
+                                                        .article(savedArticle)
+                                                        .keyword(keyword)
+                                                        .build();
+
+                                        articleKeywordRepository.save(articleKeyword);
+                                        savedKeywords.add(keywordName.trim());
+                                        log.info("ArticleKeyword 매핑 완료: articleId={}, keyword={}",
+                                                        savedArticle.getId(), keywordName);
+                                }
+
+                                // 임베딩 생성 및 저장
+                                // 주석: 발행 API로 생성된 기사는 vector_articles에 저장하지 않음
+                                // 이유: link 컬럼이 없어서 다른 기사의 연관 기사로 매핑될 때 오류 발생
+                                // 발행 기사는 크롤링 기사를 연관 기사로 찾을 수 있지만, 역방향 매핑은 되지 않음
+                                /*
+                                 * try {
+                                 * List<Double> embedding = llmService.getEmbedding(chunk.getContent());
+                                 * String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
+                                 *
+                                 * String sql =
+                                 * "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)"
+                                 * ;
+                                 * jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
+                                 * savedPaper.getPublishedDate(), vectorString);
+                                 * log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
+                                 * } catch (Exception e) {
+                                 * log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
+                                 * }
+                                 */
+
+                                runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
+                                        // 연관 기사 생성
+                                        updateRelatedArticles(savedArticle.getId(), savedKeywords);
+                                        // 연관 정책 생성
+                                        updateRelatedPolicies(savedArticle.getId(), savedKeywords);
+                                });
+
+                                // 응답 DTO 생성
+                                com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
+                                                .builder()
+                                                .id(savedArticle.getId())
+                                                .title(savedArticle.getTitle())
+                                                .summary(savedArticle.getSummary())
+                                                .keywords(savedKeywords)
+                                                .build();
+
+                                articleResponses.add(articleResponse);
+                                int processed = relatedProcessed.incrementAndGet();
+                                if (jobId != null) {
+                                        publicationProgressStore.updateRelatedProgress(jobId, processed, totalChunks);
+                                }
                         }
+                });
 
-                        // 임베딩 생성 및 저장
-                        // 주석: 발행 API로 생성된 기사는 vector_articles에 저장하지 않음
-                        // 이유: link 컬럼이 없어서 다른 기사의 연관 기사로 매핑될 때 오류 발생
-                        // 발행 기사는 크롤링 기사를 연관 기사로 찾을 수 있지만, 역방향 매핑은 되지 않음
-                        /*
-                         * try {
-                         * List<Double> embedding = llmService.getEmbedding(chunk.getContent());
-                         * String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
-                         * 
-                         * String sql =
-                         * "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)"
-                         * ;
-                         * jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
-                         * savedPaper.getPublishedDate(), vectorString);
-                         * log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
-                         * } catch (Exception e) {
-                         * log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
-                         * }
-                         */
-
-                        moveTo(jobId, PublicationStep.FINDING_RELATED);
-                        // 연관 기사 생성
-                        updateRelatedArticles(savedArticle.getId(), savedKeywords);
-                        // 연관 정책 생성
-                        updateRelatedPolicies(savedArticle.getId(), savedKeywords);
-
-                        // 응답 DTO 생성
-                        com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
-                                        .builder()
-                                        .id(savedArticle.getId())
-                                        .title(savedArticle.getTitle())
-                                        .summary(savedArticle.getSummary())
-                                        .keywords(savedKeywords)
-                                        .build();
-
-                        articleResponses.add(articleResponse);
-                }
-
-                moveTo(jobId, PublicationStep.SAVING);
+                runInStep(jobId, PublicationStep.SAVING, () -> {
+                });
                 log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
                                 savedPaper.getId(), articleChunks.size(), adminId);
 
-                // 최종 응답 생성
                 return com.qroad.be.dto.PaperCreateResponseDTO.builder()
                                 .paperId(savedPaper.getId())
                                 .articleCount(articleResponses.size())
@@ -309,6 +316,16 @@ public class PaperService {
                         return;
                 }
                 publicationProgressStore.moveTo(jobId, step);
+        }
+
+        private <T> T runInStep(String jobId, PublicationStep step, Supplier<T> action) {
+                moveTo(jobId, step);
+                return action.get();
+        }
+
+        private void runInStep(String jobId, PublicationStep step, Runnable action) {
+                moveTo(jobId, step);
+                action.run();
         }
 
         /**
