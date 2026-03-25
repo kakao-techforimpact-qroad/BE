@@ -30,7 +30,8 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
         ad.pressCompany,
         a.reporter,
         p.publishedDate,
-        a.summary
+        a.summary,
+        a.imagePath
     )
     FROM ArticleEntity a
     JOIN a.paper p

@@ -37,6 +37,9 @@ public class ArticleEntity extends BaseTimeEntity {
     @Column(length = 100)
     private String reporter;
 
+    @Column(name = "image_path", length = 500)
+    private String imagePath;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "paper_id")
     private PaperEntity paper;
