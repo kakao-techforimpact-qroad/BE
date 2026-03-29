@@ -2,6 +2,7 @@ package com.qroad.be.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.domain.PaperEntity;
 import lombok.Builder;
 import lombok.Getter;
@@ -16,6 +17,7 @@ public class PaperSummaryDto {
     private Long id;
     private String title;
     private String body;
+    private String admin;
 
     @JsonProperty("published_date")
     @JsonFormat(pattern = "yyyy-MM-dd")
@@ -30,6 +32,7 @@ public class PaperSummaryDto {
                 .title(paper.getTitle())
                 .body(bodyPreview)
                 .publishedDate(paper.getPublishedDate())
+                .admin(resolveAdminName(paper.getAdmin()))
                 .build();
     }
 
@@ -42,5 +45,15 @@ public class PaperSummaryDto {
         int lineCount = Math.min(maxLines, lines.length);
 
         return String.join("\n", Arrays.copyOfRange(lines, 0, lineCount));
+    }
+
+    private static String resolveAdminName(AdminEntity admin) {
+        if (admin == null) {
+            return "";
+        }
+        if (admin.getPressCompany() != null && !admin.getPressCompany().isBlank()) {
+            return admin.getPressCompany();
+        }
+        return admin.getLoginId() != null ? admin.getLoginId() : "";
     }
 }
