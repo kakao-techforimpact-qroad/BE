@@ -15,7 +15,7 @@
    - `ghcr.io/<owner>/<repo>:<sha12>`
    - `ghcr.io/<owner>/<repo>:latest`
 3. `deploy` job opens SSH ingress for the runner IP.
-4. Workflow connects to server via SSH and prepares `/opt/qroad` and `/log/qroad-be`.
+4. Workflow connects to server via SSH and prepares `/opt/qroad` and `~/log/qroad-be`.
 5. Workflow copies `docker-compose.prod.yml` and `scripts/deploy.sh` to `/opt/qroad`.
 6. `scripts/deploy.sh` runs on server:
    - login to GHCR
@@ -84,10 +84,10 @@ Important:
 ```bash
 docker compose -f /opt/qroad/docker-compose.prod.yml ps
 curl -fsS http://localhost:8080/actuator/health
-ls -al /log/qroad-be
+ls -al ~/log/qroad-be
 ```
 
 ## Log Files
 - Container log directory: `/log`
-- Host log directory (volume): `/log/qroad-be`
+- Host log directory (volume): `~/log/qroad-be`
 - Daily files: `YYYY-MM-DD.log` (example: `2026-03-29.log`)

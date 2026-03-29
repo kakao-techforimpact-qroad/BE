@@ -17,4 +17,4 @@ services:
       SPRING_AUTOCONFIGURE_EXCLUDE: ${SPRING_AUTOCONFIGURE_EXCLUDE}
       LOG_DIR: /log
     volumes:
-      - /log/qroad-be:/log
+      - /home/ubuntu/log/qroad-be:/log
