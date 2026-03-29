@@ -9,11 +9,12 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  build_and_push:
     runs-on: ubuntu-latest
-    concurrency:
-      group: deploy-${{ github.ref }}
-      cancel-in-progress: true
+    outputs:
+      ecr_registry: ${{ steps.meta.outputs.ecr_registry }}
+      image_uri: ${{ steps.meta.outputs.image_uri }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
 
     steps:
       - name: Checkout
@@ -21,6 +22,49 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Set Up AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+
+      - name: Set Image Metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.ap-southeast-2.amazonaws.com"
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          IMAGE_URI="${ECR_REGISTRY}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}"
+
+          echo "ecr_registry=${ECR_REGISTRY}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LATEST_IMAGE="${{ steps.meta.outputs.ecr_registry }}/${{ secrets.ECR_REPOSITORY }}:latest"
+          docker build -t "${{ steps.meta.outputs.image_uri }}" -t "${LATEST_IMAGE}" .
+          docker push "${{ steps.meta.outputs.image_uri }}"
+          docker push "${LATEST_IMAGE}"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build_and_push]
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
       - name: Set Up AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -64,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          ECR_PASSWORD="$(aws ecr get-login-password --region ap-southeast-2)"
           echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > /tmp/private_key
           chmod 600 /tmp/private_key
 
@@ -71,6 +116,12 @@ jobs:
             set -euo pipefail &&
             cd /home/ubuntu/BE &&
             git config --global --add safe.directory /home/ubuntu/BE &&
+            git fetch origin &&
+            git checkout '${{ github.ref_name }}' &&
+            git pull --ff-only origin '${{ github.ref_name }}' &&
+            export ECR_REGISTRY='${{ needs.build_and_push.outputs.ecr_registry }}' &&
+            export ECR_PASSWORD='${ECR_PASSWORD}' &&
+            export IMAGE_URI='${{ needs.build_and_push.outputs.image_uri }}' &&
             export DB_URL='${{ secrets.DB_URL }}' &&
             export DB_USERNAME='${{ secrets.DB_USERNAME }}' &&
             export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' &&

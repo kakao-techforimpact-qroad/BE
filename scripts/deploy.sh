@@ -1,64 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
-APP_NAME="be-0.0.1-SNAPSHOT.jar"
-APP_PATH="/home/ubuntu/BE/build/libs/${APP_NAME}"
-LOG_PATH="/var/log/be/be.log"
-SPRING_AUTOCONFIGURE_EXCLUDE="org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration"
-GRACEFUL_TIMEOUT_SECONDS=20
+APP_DIR="${APP_DIR:-/home/ubuntu/BE}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+SPRING_AUTOCONFIGURE_EXCLUDE="${SPRING_AUTOCONFIGURE_EXCLUDE:-org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration}"
 HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8080/actuator/health}"
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-30}"
 HEALTH_CHECK_INTERVAL_SECONDS="${HEALTH_CHECK_INTERVAL_SECONDS:-2}"
 
-echo "[0/6] Preparing log directory..."
-sudo mkdir -p /var/log/be
-sudo chown ubuntu:ubuntu /var/log/be
+: "${ECR_REGISTRY:?ECR_REGISTRY is required}"
+: "${ECR_PASSWORD:?ECR_PASSWORD is required}"
+: "${IMAGE_URI:?IMAGE_URI is required}"
 
-echo "[1/6] Updating source (main)..."
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
+echo "[1/5] Switching to app directory..."
+cd "${APP_DIR}"
 
-echo "[2/6] Stopping existing application..."
-PID="$(pgrep -f "${APP_NAME}" || true)"
+echo "[2/5] Logging in to ECR..."
+echo "${ECR_PASSWORD}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 
-if [[ -n "${PID}" ]]; then
-  echo "Sending SIGTERM to process ${PID}"
-  kill "${PID}" || true
-
-  for _ in $(seq 1 "${GRACEFUL_TIMEOUT_SECONDS}"); do
-    if ! kill -0 "${PID}" 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "Process ${PID} is still alive. Forcing SIGKILL."
-    kill -9 "${PID}"
-  fi
-else
-  echo "No running process found."
-fi
-
-echo "[3/6] Building..."
-./gradlew clean build -x test
-
-echo "[4/6] Starting application..."
+echo "[3/5] Pulling and starting container..."
 export SPRING_AUTOCONFIGURE_EXCLUDE
-nohup java -jar "${APP_PATH}" >> "${LOG_PATH}" 2>&1 &
+docker compose -f "${COMPOSE_FILE}" pull app
+docker compose -f "${COMPOSE_FILE}" up -d app
 
-echo "[5/6] Waiting for health check: ${HEALTH_CHECK_URL}"
+echo "[4/5] Waiting for health check: ${HEALTH_CHECK_URL}"
 for _ in $(seq 1 "${HEALTH_CHECK_RETRIES}"); do
   if curl -fsS "${HEALTH_CHECK_URL}" >/dev/null; then
     echo "Health check passed."
-    echo "[6/6] Deployment complete."
+    echo "[5/5] Docker deployment complete."
+    docker image prune -f >/dev/null 2>&1 || true
     exit 0
   fi
+
   sleep "${HEALTH_CHECK_INTERVAL_SECONDS}"
 done
 
 echo "Health check failed after ${HEALTH_CHECK_RETRIES} attempts."
-echo "Recent logs:"
-tail -n 100 "${LOG_PATH}" || true
+echo "Recent container logs:"
+docker compose -f "${COMPOSE_FILE}" logs --tail 120 app || true
 exit 1
