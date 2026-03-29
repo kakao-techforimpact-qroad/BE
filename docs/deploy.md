@@ -18,9 +18,11 @@
 4. Workflow connects to server via SSH and syncs the same git branch.
 5. `scripts/deploy.sh` runs on server:
    - login to GHCR
-   - `docker compose pull app`
+   - commit tag image pull first
+   - if commit tag pull fails, fallback to `latest`
    - `docker compose up -d app`
    - health check (`/actuator/health` by default)
+   - if health check fails, rollback to previous image
 6. Runner IP is revoked from security group (`if: always()`).
 
 ## Safety Improvements
@@ -50,6 +52,9 @@
 - Check deployment logs:
   - GitHub Actions run logs
   - Server container logs: `docker compose -f docker-compose.prod.yml logs --tail 120 app`
+- Rollback:
+  - deploy script keeps previous running image URI
+  - if new image health check fails, script attempts rollback automatically
 
 ## Server Prerequisites
 - Docker installed
@@ -63,7 +68,7 @@ Run these commands on the server:
 ```bash
 cd /home/ubuntu/BE
 chmod +x scripts/deploy.sh
-# export required env vars first (IMAGE_URI, REGISTRY, REGISTRY_USERNAME, REGISTRY_PASSWORD, app secrets)
+# export required env vars first (IMAGE_URI, LATEST_IMAGE_URI, REGISTRY, REGISTRY_USERNAME, REGISTRY_PASSWORD, app secrets)
 ./scripts/deploy.sh
 ```
 

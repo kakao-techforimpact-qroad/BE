@@ -15,6 +15,7 @@ jobs:
     outputs:
       registry: ${{ steps.meta.outputs.registry }}
       image_uri: ${{ steps.meta.outputs.image_uri }}
+      latest_image_uri: ${{ steps.meta.outputs.latest_image_uri }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
 
     steps:
@@ -33,10 +34,12 @@ jobs:
           REPO_LOWER="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           IMAGE_TAG="${GITHUB_SHA::12}"
           IMAGE_URI="${REGISTRY}/${REPO_LOWER}:${IMAGE_TAG}"
+          LATEST_IMAGE_URI="${REGISTRY}/${REPO_LOWER}:latest"
 
           echo "registry=${REGISTRY}" >> "${GITHUB_OUTPUT}"
           echo "image_tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
           echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+          echo "latest_image_uri=${LATEST_IMAGE_URI}" >> "${GITHUB_OUTPUT}"
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -121,6 +124,7 @@ jobs:
             export REGISTRY_USERNAME='${{ secrets.GHCR_USERNAME }}' &&
             export REGISTRY_PASSWORD='${{ secrets.GHCR_TOKEN }}' &&
             export IMAGE_URI='${{ needs.build_and_push.outputs.image_uri }}' &&
+            export LATEST_IMAGE_URI='${{ needs.build_and_push.outputs.latest_image_uri }}' &&
             export DB_URL='${{ secrets.DB_URL }}' &&
             export DB_USERNAME='${{ secrets.DB_USERNAME }}' &&
             export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' &&
