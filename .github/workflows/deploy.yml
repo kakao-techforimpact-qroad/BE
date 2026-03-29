@@ -11,6 +11,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - name: Checkout
@@ -34,12 +37,27 @@ jobs:
           echo "RUNNER_IP=${RUNNER_IP}" >> "${GITHUB_ENV}"
           echo "Opening SSH ingress for runner IP: ${RUNNER_IP}"
 
-          aws ec2 authorize-security-group-ingress \
+          if aws ec2 authorize-security-group-ingress \
             --group-id "${{ secrets.AWS_SECURITY_GROUP_ID }}" \
             --protocol tcp \
             --port 22 \
             --cidr "${RUNNER_IP}/32" \
-            --region ap-southeast-2
+            --region ap-southeast-2; then
+            echo "Ingress rule added."
+          else
+            echo "Ingress add failed. Checking if duplicate rule already exists."
+            EXISTING_RULE_COUNT="$(aws ec2 describe-security-groups \
+              --group-ids "${{ secrets.AWS_SECURITY_GROUP_ID }}" \
+              --region ap-southeast-2 \
+              --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\` && IpProtocol==\`tcp\`].IpRanges[?CidrIp=='${RUNNER_IP}/32'] | length(@)" \
+              --output text)"
+            if [[ "${EXISTING_RULE_COUNT}" == "1" ]]; then
+              echo "Ingress rule already exists. Continuing."
+            else
+              echo "Failed to add ingress rule and no duplicate detected."
+              exit 1
+            fi
+          fi
 
       - name: Deploy Over SSH
         shell: bash
@@ -62,7 +80,7 @@ jobs:
             export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' &&
             export JWT_SECRET='${{ secrets.JWT_SECRET }}' &&
             export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
-            bash .github/workflows/deploy.sh
+            bash scripts/deploy.sh
           "
 
       - name: Close SSH Ingress For Runner
@@ -77,9 +95,24 @@ jobs:
           fi
 
           echo "Closing SSH ingress for runner IP: ${RUNNER_IP}"
-          aws ec2 revoke-security-group-ingress \
+          if aws ec2 revoke-security-group-ingress \
             --group-id "${{ secrets.AWS_SECURITY_GROUP_ID }}" \
             --protocol tcp \
             --port 22 \
             --cidr "${RUNNER_IP}/32" \
-            --region ap-southeast-2
+            --region ap-southeast-2; then
+            echo "Ingress rule removed."
+          else
+            echo "Ingress revoke failed. Checking if rule is already absent."
+            EXISTING_RULE_COUNT="$(aws ec2 describe-security-groups \
+              --group-ids "${{ secrets.AWS_SECURITY_GROUP_ID }}" \
+              --region ap-southeast-2 \
+              --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\` && IpProtocol==\`tcp\`].IpRanges[?CidrIp=='${RUNNER_IP}/32'] | length(@)" \
+              --output text)"
+            if [[ "${EXISTING_RULE_COUNT}" == "0" ]]; then
+              echo "Ingress rule already absent. Continuing."
+            else
+              echo "Failed to revoke ingress rule and it still exists."
+              exit 1
+            fi
+          fi

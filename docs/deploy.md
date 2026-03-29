@@ -3,6 +3,7 @@
 ## Overview
 - Trigger: `push` to `main` or manual `workflow_dispatch`
 - Workflow file: `.github/workflows/deploy.yml`
+- Deploy script: `scripts/deploy.sh`
 - Remote host: `ubuntu@api.qroad.info`
 - Remote app dir: `/home/ubuntu/BE`
 - Runtime log: `/var/log/be/be.log`
@@ -17,7 +18,12 @@
    - stop old process (graceful stop, then force kill if needed)
    - build with Gradle (`clean build -x test`)
    - restart app with `nohup java -jar ...`
+   - wait for health check (`/actuator/health` by default)
 6. Runner IP is revoked from security group (`if: always()`).
+
+## Safety Improvements
+- `concurrency` is enabled in GitHub Actions to avoid overlapping deployments on the same ref.
+- Security group ingress add/revoke handles duplicate or missing-rule scenarios safely.
 
 ## Required Secrets
 - `AWS_ACCESS_KEY_ID`
@@ -45,8 +51,8 @@ Run these commands on the server:
 
 ```bash
 cd /home/ubuntu/BE
-chmod +x .github/workflows/deploy.sh
-./.github/workflows/deploy.sh
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
 ```
 
 Important:
