@@ -6,6 +6,7 @@ import com.qroad.be.dto.PresignedUploadResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -65,6 +66,20 @@ public class S3PresignService {
                 s3Client.deleteObject(deleteRequest);
 
                 return new FinalizeUploadResponse(finalKey);
+        }
+
+        /**
+         * 이미지 바이트 배열을 S3에 업로드하고 저장된 key를 반환합니다.
+         * 기사 이미지를 article-image/{paperId}/{index}.jpg 경로에 저장할 때 사용합니다.
+         */
+        public String uploadImage(byte[] imageBytes, String key) {
+                PutObjectRequest putRequest = PutObjectRequest.builder()
+                                .bucket(properties.getBucket())
+                                .key(key)
+                                .contentType("image/jpeg")
+                                .build();
+                s3Client.putObject(putRequest, RequestBody.fromBytes(imageBytes));
+                return key;
         }
 
         /**

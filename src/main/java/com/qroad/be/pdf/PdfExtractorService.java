@@ -3,8 +3,12 @@ package com.qroad.be.pdf;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.stereotype.Service;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
@@ -56,6 +60,122 @@ public class PdfExtractorService {
             }
             return sb.toString();
         }
+    }
+
+    /**
+     * PDF 바이트 배열을 받아 텍스트와 기사별 이미지를 함께 반환합니다.
+     * PaperService에서 텍스트 추출과 이미지 추출을 한 번의 PDF 로드로 처리하기 위해 사용합니다.
+     */
+    public ExtractionResult extractWithImages(byte[] pdfBytes) throws IOException {
+        try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
+            List<PdfArticle> allArticles = new ArrayList<>();
+
+            for (int pi = 0; pi < document.getNumberOfPages(); pi++) {
+                List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
+                int idx = 1;
+                for (PdfArticle a : pageArticles) {
+                    a.setPage(pi + 1);
+                    a.setId(String.format("p%02d_a%03d", pi + 1, idx++));
+                    allArticles.add(a);
+                }
+            }
+
+            // 텍스트 생성 (extractText와 동일한 포맷)
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < allArticles.size(); i++) {
+                PdfArticle a = allArticles.get(i);
+                sb.append("=".repeat(60)).append("\n");
+                sb.append(String.format("[기사 %d] 페이지 %d | %s%n", i + 1, a.getPage(), a.getId()));
+                sb.append("=".repeat(60)).append("\n");
+                sb.append("제목: ").append(a.getTitle().trim()).append("\n\n");
+                sb.append(a.getText().trim()).append("\n\n\n");
+            }
+
+            // 기사별 이미지 추출 (bodyBbox 영역 crop)
+            List<ArticleImageData> images = new ArrayList<>();
+            for (PdfArticle a : allArticles) {
+                try {
+                    byte[] imageBytes = cropPageRegion(document, a.getPage() - 1, a.getBodyBbox(), 150);
+                    if (imageBytes != null) {
+                        images.add(new ArticleImageData(a.getTitle().trim(), imageBytes));
+                    }
+                } catch (Exception e) {
+                    // 이미지 추출 실패해도 전체 흐름은 계속 진행
+                }
+            }
+
+            return new ExtractionResult(sb.toString(), images);
+        }
+    }
+
+    /**
+     * PDF 특정 페이지의 지정 영역(bbox)을 JPEG 이미지로 잘라서 반환합니다.
+     *
+     * @param document   로드된 PDF 문서
+     * @param pageIndex  0-based 페이지 번호
+     * @param bbox       자를 영역 {x0, y0, x1, y1} (PDF 포인트 단위)
+     * @param dpi        렌더링 해상도 (150 = 웹용, 300 = 고화질)
+     */
+    private byte[] cropPageRegion(PDDocument document, int pageIndex, double[] bbox, float dpi) throws IOException {
+        PDFRenderer renderer = new PDFRenderer(document);
+        BufferedImage fullPage = renderer.renderImageWithDPI(pageIndex, dpi);
+
+        // PDF 포인트 → 픽셀 변환 (기본 72dpi 기준)
+        float scale = dpi / 72f;
+        int x = (int) (bbox[0] * scale);
+        int y = (int) (bbox[1] * scale);
+        int w = (int) ((bbox[2] - bbox[0]) * scale);
+        int h = (int) ((bbox[3] - bbox[1]) * scale);
+
+        // 이미지 경계를 넘지 않도록 보정
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        w = Math.min(w, fullPage.getWidth() - x);
+        h = Math.min(h, fullPage.getHeight() - y);
+
+        if (w <= 0 || h <= 0) return null;
+
+        BufferedImage cropped = fullPage.getSubimage(x, y, w, h);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(cropped, "JPEG", out);
+        return out.toByteArray();
+    }
+
+    // ──────────────────────── result classes ────────────────────────
+
+    /**
+     * extractWithImages()의 반환값.
+     * 텍스트(LLM에 넘길 전문)와 기사별 이미지 데이터를 함께 담습니다.
+     */
+    public static class ExtractionResult {
+        private final String text;
+        private final List<ArticleImageData> articleImages;
+
+        public ExtractionResult(String text, List<ArticleImageData> articleImages) {
+            this.text = text;
+            this.articleImages = articleImages;
+        }
+
+        public String getText() { return text; }
+        public List<ArticleImageData> getArticleImages() { return articleImages; }
+    }
+
+    /**
+     * 기사 하나의 이미지 데이터.
+     * title: PDF에서 추출한 기사 제목 (LLM 결과와 매핑할 때 사용)
+     * imageBytes: crop된 JPEG 이미지 바이트
+     */
+    public static class ArticleImageData {
+        private final String title;
+        private final byte[] imageBytes;
+
+        public ArticleImageData(String title, byte[] imageBytes) {
+            this.title = title;
+            this.imageBytes = imageBytes;
+        }
+
+        public String getTitle() { return title; }
+        public byte[] getImageBytes() { return imageBytes; }
     }
 
     // ──────────────────────── title detection ────────────────────────

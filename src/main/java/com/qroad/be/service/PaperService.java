@@ -25,6 +25,8 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
+import com.qroad.be.pdf.PdfExtractorService.ArticleImageData;
 
 @Slf4j
 @Service
@@ -81,6 +83,7 @@ public class PaperService {
                                                         .title(article.getTitle())
                                                         .summary(article.getSummary())
                                                         .keywords(keywords)
+                                                        .imagePath(article.getImagePath())
                                                         .build();
                                 })
                                 .collect(Collectors.toList());
@@ -156,16 +159,20 @@ public class PaperService {
                 log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
                                 request.getTitle(), request.getPublishedDate(), adminId);
 
-                String content = runInStep(jobId, PublicationStep.PDF_READING, () -> {
+                // PDF를 한 번만 읽어서 텍스트와 이미지를 동시에 추출
+                ExtractionResult extraction = runInStep(jobId, PublicationStep.PDF_READING, () -> {
                         try {
                                 byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
-                                String extracted = pdfExtractorService.extractText(pdfBytes);
-                                log.info("PDF 텍스트 추출 완료: tempKey={}, length={}", request.getTempKey(), extracted.length());
-                                return extracted;
+                                ExtractionResult result = pdfExtractorService.extractWithImages(pdfBytes);
+                                log.info("PDF 추출 완료: tempKey={}, textLength={}, imageCount={}",
+                                                request.getTempKey(), result.getText().length(),
+                                                result.getArticleImages().size());
+                                return result;
                         } catch (Exception e) {
-                                throw new RuntimeException("PDF 텍스트 추출 실패: " + request.getTempKey(), e);
+                                throw new RuntimeException("PDF 추출 실패: " + request.getTempKey(), e);
                         }
                 });
+                String content = extraction.getText();
 
                 AdminEntity admin = null;
                 if (adminId != null) {
@@ -184,6 +191,22 @@ public class PaperService {
 
                 PaperEntity savedPaper = paperRepository.save(paper);
                 log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
+
+                // 기사별 이미지를 S3에 업로드하고 제목→S3 key 맵을 생성
+                // 나중에 LLM이 반환한 기사 제목과 매핑할 때 사용
+                Map<String, String> titleToImageKey = new HashMap<>();
+                List<ArticleImageData> articleImages = extraction.getArticleImages();
+                for (int i = 0; i < articleImages.size(); i++) {
+                        ArticleImageData img = articleImages.get(i);
+                        try {
+                                String key = String.format("article-image/%d/%d.jpg", savedPaper.getId(), i);
+                                s3PresignService.uploadImage(img.getImageBytes(), key);
+                                titleToImageKey.put(img.getTitle(), key);
+                                log.info("기사 이미지 업로드 완료: key={}", key);
+                        } catch (Exception e) {
+                                log.warn("기사 이미지 업로드 실패 (무시하고 계속): title={}", img.getTitle(), e);
+                        }
+                }
 
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
                                 jobId,
@@ -209,6 +232,9 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                                // PDF에서 추출한 이미지와 LLM이 분석한 기사 제목을 매핑
+                                String imagePath = findImageKey(chunk.getTitle(), titleToImageKey);
+
                                 ArticleEntity article = ArticleEntity.builder()
                                                 .title(chunk.getTitle())
                                                 .content(chunk.getContent())
@@ -218,6 +244,7 @@ public class PaperService {
                                                 .status("ACTIVE")
                                                 .paper(savedPaper)
                                                 .admin(finalAdmin)
+                                                .imagePath(imagePath)
                                                 .build();
 
                                 ArticleEntity savedArticle = articleRepository.save(article);
@@ -516,6 +543,33 @@ public class PaperService {
                                 .summary(savedArticle.getSummary())
                                 .keywords(currentKeywords)
                                 .build();
+        }
+
+        /**
+         * PDF에서 추출한 기사 제목과 LLM이 분석한 기사 제목을 비교해 S3 이미지 key를 반환합니다.
+         *
+         * 매핑 전략:
+         * 1단계 - 완전 일치 (대소문자/공백 무시)
+         * 2단계 - 부분 일치 (한쪽 제목이 다른 쪽을 포함)
+         * 매핑 실패 시 null 반환 → 이미지 없는 기사로 저장됨
+         */
+        private String findImageKey(String articleTitle, Map<String, String> titleToImageKey) {
+                if (articleTitle == null || titleToImageKey.isEmpty()) return null;
+                String normalized = articleTitle.trim().toLowerCase();
+                // 1단계: 완전 일치
+                for (Map.Entry<String, String> entry : titleToImageKey.entrySet()) {
+                        if (entry.getKey().trim().toLowerCase().equals(normalized)) {
+                                return entry.getValue();
+                        }
+                }
+                // 2단계: 부분 일치
+                for (Map.Entry<String, String> entry : titleToImageKey.entrySet()) {
+                        String key = entry.getKey().trim().toLowerCase();
+                        if (key.contains(normalized) || normalized.contains(key)) {
+                                return entry.getValue();
+                        }
+                }
+                return null;
         }
 
         /**
