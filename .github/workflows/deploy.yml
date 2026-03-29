@@ -110,16 +110,26 @@ jobs:
         run: |
           set -euo pipefail
 
+          APP_DIR="/opt/qroad"
           echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > /tmp/private_key
           chmod 600 /tmp/private_key
 
           ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@api.qroad.info "
             set -euo pipefail &&
-            cd /home/ubuntu/BE &&
-            git config --global --add safe.directory /home/ubuntu/BE &&
-            git fetch origin &&
-            git checkout '${{ github.ref_name }}' &&
-            git pull --ff-only origin '${{ github.ref_name }}' &&
+            sudo mkdir -p '${APP_DIR}' &&
+            sudo chown ubuntu:ubuntu '${APP_DIR}' &&
+            sudo mkdir -p /log/qroad-be &&
+            sudo chown -R ubuntu:ubuntu /log/qroad-be
+          "
+
+          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key docker-compose.prod.yml ubuntu@api.qroad.info:${APP_DIR}/docker-compose.prod.yml
+          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key scripts/deploy.sh ubuntu@api.qroad.info:${APP_DIR}/deploy.sh
+
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@api.qroad.info "
+            set -euo pipefail &&
+            chmod +x '${APP_DIR}/deploy.sh' &&
+            export APP_DIR='${APP_DIR}' &&
+            export COMPOSE_FILE='docker-compose.prod.yml' &&
             export REGISTRY='${{ needs.build_and_push.outputs.registry }}' &&
             export REGISTRY_USERNAME='${{ secrets.GHCR_USERNAME }}' &&
             export REGISTRY_PASSWORD='${{ secrets.GHCR_TOKEN }}' &&
@@ -134,7 +144,7 @@ jobs:
             export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' &&
             export JWT_SECRET='${{ secrets.JWT_SECRET }}' &&
             export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
-            bash scripts/deploy.sh
+            '${APP_DIR}/deploy.sh'
           "
 
       - name: Close SSH Ingress For Runner

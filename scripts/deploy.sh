@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/home/ubuntu/BE}"
+APP_DIR="${APP_DIR:-/opt/qroad}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 SPRING_AUTOCONFIGURE_EXCLUDE="${SPRING_AUTOCONFIGURE_EXCLUDE:-org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration}"
 HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8080/actuator/health}"

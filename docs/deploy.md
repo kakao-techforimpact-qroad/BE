@@ -7,7 +7,7 @@
 - Compose file: `docker-compose.prod.yml`
 - Deploy script: `scripts/deploy.sh`
 - Remote host: `ubuntu@api.qroad.info`
-- Remote app dir: `/home/ubuntu/BE`
+- Remote deploy dir: `/opt/qroad`
 
 ## Deployment Flow
 1. GitHub Actions starts on `main` push.
@@ -15,20 +15,22 @@
    - `ghcr.io/<owner>/<repo>:<sha12>`
    - `ghcr.io/<owner>/<repo>:latest`
 3. `deploy` job opens SSH ingress for the runner IP.
-4. Workflow connects to server via SSH and syncs the same git branch.
-5. `scripts/deploy.sh` runs on server:
+4. Workflow connects to server via SSH and prepares `/opt/qroad` and `/log/qroad-be`.
+5. Workflow copies `docker-compose.prod.yml` and `scripts/deploy.sh` to `/opt/qroad`.
+6. `scripts/deploy.sh` runs on server:
    - login to GHCR
    - commit tag image pull first
    - if commit tag pull fails, fallback to `latest`
    - `docker compose up -d app`
    - health check (`/actuator/health` by default)
    - if health check fails, rollback to previous image
-6. Runner IP is revoked from security group (`if: always()`).
+7. Runner IP is revoked from security group (`if: always()`).
 
 ## Safety Improvements
 - `concurrency` is enabled in GitHub Actions to avoid overlapping deployments on the same ref.
 - Security group ingress add/revoke handles duplicate or missing-rule scenarios safely.
 - Server does not build artifacts anymore; image is built once in CI and pulled in deployment.
+- Server does not require git clone for deployment.
 
 ## Required Secrets
 - `AWS_ACCESS_KEY_ID`
@@ -60,16 +62,18 @@
 - Docker installed
 - Docker Compose V2 (`docker compose`)
 - `ubuntu` user can run Docker commands
-- Repository is cloned at `/home/ubuntu/BE`
+- SSH access to target host (`ubuntu@api.qroad.info`)
 
 ## Manual Deployment (Server)
 Run these commands on the server:
 
 ```bash
-cd /home/ubuntu/BE
-chmod +x scripts/deploy.sh
+mkdir -p /opt/qroad
+cd /opt/qroad
+# deploy.sh and docker-compose.prod.yml should exist in this directory
+chmod +x deploy.sh
 # export required env vars first (IMAGE_URI, LATEST_IMAGE_URI, REGISTRY, REGISTRY_USERNAME, REGISTRY_PASSWORD, app secrets)
-./scripts/deploy.sh
+./deploy.sh
 ```
 
 Important:
@@ -78,7 +82,7 @@ Important:
 
 ## Quick Verification
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker compose -f /opt/qroad/docker-compose.prod.yml ps
 curl -fsS http://localhost:8080/actuator/health
 ls -al /log/qroad-be
 ```
