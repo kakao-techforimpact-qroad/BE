@@ -110,4 +110,18 @@ public class ArticleEmotionService {
                 .build();
     }
 
+    /**
+     * 특정 사용자가 특정 기사에 현재 선택한 감정을 반환합니다.
+     * 감정이 없으면 null을 반환합니다.
+     */
+    @Transactional(readOnly = true)
+    public EmotionType getMyEmotion(Long articleId, String userIdentifier) {
+        if (userIdentifier == null || userIdentifier.isBlank()) {
+            return null;
+        }
+        return articleEmotionRepository.findByArticle_IdAndUserIdentifier(articleId, userIdentifier)
+                .map(ArticleEmotionEntity::getEmotionType)
+                .orElse(null);
+    }
+
 }

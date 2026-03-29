@@ -1,5 +1,6 @@
 package com.qroad.be.service;
 
+import com.qroad.be.domain.EmotionType;
 import com.qroad.be.dto.ArticleRelatedDTO;
 import com.qroad.be.dto.EmotionStatsDTO;
 import com.qroad.be.dto.PolicyArticleRelatedDTO;
@@ -23,7 +24,7 @@ public class ArticleService {
         private final ArticlePolicyRelatedRepository articlePolicyRelatedRepository;
         private final ArticleEmotionService articleEmotionService;
 
-        public ArticlesDetailDTO getArticleDetail(Long articleId) {
+        public ArticlesDetailDTO getArticleDetail(Long articleId, String userIdentifier) {
 
                 // 1. 기본 article 정보 없으면 예외 발생
                 ArticlesDetailDTO dto = articleRepository.findArticleDetailById(articleId)
@@ -48,6 +49,10 @@ public class ArticleService {
                 // 4. 감정 통계 추가
                 EmotionStatsDTO emotionStats = articleEmotionService.getEmotionStats(articleId);
                 dto.setEmotionStats(emotionStats);
+
+                // 4-1. 사용자 본인 감정 상태 추가 (없으면 null)
+                EmotionType myEmotion = articleEmotionService.getMyEmotion(articleId, userIdentifier);
+                dto.setMyEmotion(myEmotion);
 
                 // 5. 키워드 추출 추가
                 List<String> keywords = articleRepository.findKeywordNamesByArticleId(articleId);
