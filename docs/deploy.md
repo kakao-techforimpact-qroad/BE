@@ -12,12 +12,12 @@
 ## Deployment Flow
 1. GitHub Actions starts on `main` push.
 2. `build_and_push` job builds Docker image and pushes:
-   - `${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA:0:12}`
-   - `${ECR_REGISTRY}/${ECR_REPOSITORY}:latest`
+   - `ghcr.io/<owner>/<repo>:<sha12>`
+   - `ghcr.io/<owner>/<repo>:latest`
 3. `deploy` job opens SSH ingress for the runner IP.
 4. Workflow connects to server via SSH and syncs the same git branch.
 5. `scripts/deploy.sh` runs on server:
-   - login to ECR
+   - login to GHCR
    - `docker compose pull app`
    - `docker compose up -d app`
    - health check (`/actuator/health` by default)
@@ -33,7 +33,8 @@
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SECURITY_GROUP_ID`
 - `SSH_PRIVATE_KEY`
-- `ECR_REPOSITORY`
+- `GHCR_USERNAME`
+- `GHCR_TOKEN` (PAT with `read:packages`)
 - `DB_URL`
 - `DB_USERNAME`
 - `DB_PASSWORD`
@@ -62,7 +63,7 @@ Run these commands on the server:
 ```bash
 cd /home/ubuntu/BE
 chmod +x scripts/deploy.sh
-# export required env vars first (IMAGE_URI, ECR_REGISTRY, ECR_PASSWORD, app secrets)
+# export required env vars first (IMAGE_URI, REGISTRY, REGISTRY_USERNAME, REGISTRY_PASSWORD, app secrets)
 ./scripts/deploy.sh
 ```
 
