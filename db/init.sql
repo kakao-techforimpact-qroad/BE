@@ -35,6 +35,7 @@ CREATE TABLE articles (
     link TEXT NOT NULL,
     status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'EXPIRED')),
     reporter VARCHAR(100),
+    image_path VARCHAR(500),
     paper_id BIGINT REFERENCES papers(id) ON DELETE SET NULL,
     admin_id BIGINT REFERENCES admins(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

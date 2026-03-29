@@ -18,6 +18,7 @@ public class ArticlesDetailDTO {
     private String reporter;
     private LocalDate publishedDate;
     private String summary;
+    private String imagePath;
 
     private List<ArticleRelatedDTO> articleRelatedDTOS;
     private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;
@@ -34,5 +35,16 @@ public class ArticlesDetailDTO {
         this.reporter = reporter;
         this.publishedDate = publishedDate;
         this.summary = summary;
+    }
+
+    public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
+            String reporter, LocalDate publishedDate, String summary, String imagePath) {
+        this.articleId = articleId;
+        this.title = title;
+        this.pressCompany = pressCompany;
+        this.reporter = reporter;
+        this.publishedDate = publishedDate;
+        this.summary = summary;
+        this.imagePath = imagePath;
     }
 }
