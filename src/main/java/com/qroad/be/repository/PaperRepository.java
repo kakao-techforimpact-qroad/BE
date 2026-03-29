@@ -7,6 +7,7 @@ import com.qroad.be.domain.PaperEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -16,7 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface PaperRepository extends JpaRepository<PaperEntity, Long> {
+public interface PaperRepository extends JpaRepository<PaperEntity, Long>, JpaSpecificationExecutor<PaperEntity> {
     List<PaperEntity> findByStatus(String status);
     List<PaperEntity> findByPublishedDate(LocalDate publishedDate);
     List<PaperEntity> findByAdminId(Long adminId);

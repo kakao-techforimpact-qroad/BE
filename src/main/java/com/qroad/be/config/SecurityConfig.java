@@ -6,6 +6,7 @@ import com.qroad.be.security.UserUuidCookieFilter;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -14,7 +15,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import org.springframework.http.HttpMethod;
 import java.util.List;
 
 @Configuration
@@ -27,30 +27,25 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-
         http
                 .csrf(csrf -> csrf.disable())
-                .formLogin(form -> form.disable())   // 기본 로그인 끄기
-                .httpBasic(basic -> basic.disable()) // 기본 Basic Auth 끄기
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
-                        // 인증 없이 허용
                         .requestMatchers(
                                 "/actuator/**",
                                 "/api/admin/login",
                                 "/api/admin/register",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
-                                // 사용자 페이지
                                 "/api/qr/**",
                                 "/api/articles/**"
                         ).permitAll()
-                        // 제보 등록은 인증 없이 허용 (POST만)
                         .requestMatchers(HttpMethod.POST, "/api/reports").permitAll()
-                        // 그 외는 인증 필요
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(
@@ -71,7 +66,10 @@ public class SecurityConfig {
 
         config.setAllowedOrigins(List.of(
                 "http://localhost:3000",
+                "http://localhost:5173",
                 "http://localhost:8080",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173",
                 "https://qroad.info",
                 "https://www.qroad.info",
                 "https://api.qroad.info",
@@ -91,14 +89,11 @@ public class SecurityConfig {
                 "Authorization"
         ));
 
-        config.setAllowCredentials(false); // JWT이므로 false
+        config.setAllowCredentials(true);
 
-        UrlBasedCorsConfigurationSource source =
-                new UrlBasedCorsConfigurationSource();
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
 
         return source;
     }
 }
-
-
