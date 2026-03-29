@@ -8,15 +8,16 @@ HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8080/actuator/health}"
 HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-30}"
 HEALTH_CHECK_INTERVAL_SECONDS="${HEALTH_CHECK_INTERVAL_SECONDS:-2}"
 
-: "${ECR_REGISTRY:?ECR_REGISTRY is required}"
-: "${ECR_PASSWORD:?ECR_PASSWORD is required}"
+: "${REGISTRY:?REGISTRY is required}"
+: "${REGISTRY_USERNAME:?REGISTRY_USERNAME is required}"
+: "${REGISTRY_PASSWORD:?REGISTRY_PASSWORD is required}"
 : "${IMAGE_URI:?IMAGE_URI is required}"
 
 echo "[1/5] Switching to app directory..."
 cd "${APP_DIR}"
 
-echo "[2/5] Logging in to ECR..."
-echo "${ECR_PASSWORD}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+echo "[2/5] Logging in to container registry..."
+echo "${REGISTRY_PASSWORD}" | docker login --username "${REGISTRY_USERNAME}" --password-stdin "${REGISTRY}"
 
 echo "[3/5] Pulling and starting container..."
 export SPRING_AUTOCONFIGURE_EXCLUDE
