@@ -421,6 +421,10 @@ public class PdfExtractorService {
                         .map(Line::getText)
                         .collect(Collectors.joining("\n")).trim();
 
+                // 본문 텍스트가 너무 짧으면 광고/이미지 영역으로 판단하고 건너뜀
+                // 30자 미만: 의미있는 기사 본문이 될 수 없음 (광고, 이미지, 소제목 등)
+                if (text.length() < 30) continue;
+
                 Integer contTo = detectContinuation(text);
 
                 // Clean up title: strip merged page numbers from section headers
