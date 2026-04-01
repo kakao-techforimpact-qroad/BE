@@ -610,7 +610,7 @@ public class PaperService {
          */
         private String getCategoryImage(String category) {
                 if (category == null)
-                        return "ai-images/placeholder.jpg";
+                        return "ai-images/placeholder.png";
 
                 return switch (category) {
                         case "지방 행정" -> "ai-images/지방 행정.png";
