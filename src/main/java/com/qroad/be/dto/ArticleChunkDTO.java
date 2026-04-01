@@ -17,4 +17,5 @@ public class ArticleChunkDTO {
     private String reporter;
     private String summary;
     private List<String> keywords;
+    private String category;
 }
