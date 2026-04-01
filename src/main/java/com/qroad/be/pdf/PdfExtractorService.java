@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -67,16 +68,24 @@ public class PdfExtractorService {
      * PaperService에서 텍스트 추출과 이미지 추출을 한 번의 PDF 로드로 처리하기 위해 사용합니다.
      */
     public ExtractionResult extractWithImages(byte[] pdfBytes) throws IOException {
+        return extractWithImages(pdfBytes, null);
+    }
+
+    public ExtractionResult extractWithImages(byte[] pdfBytes, BiConsumer<Integer, Integer> progressCallback) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
             List<PdfArticle> allArticles = new ArrayList<>();
+            int totalPages = document.getNumberOfPages();
 
-            for (int pi = 0; pi < document.getNumberOfPages(); pi++) {
+            for (int pi = 0; pi < totalPages; pi++) {
                 List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
                 int idx = 1;
                 for (PdfArticle a : pageArticles) {
                     a.setPage(pi + 1);
                     a.setId(String.format("p%02d_a%03d", pi + 1, idx++));
                     allArticles.add(a);
+                }
+                if (progressCallback != null) {
+                    progressCallback.accept(pi + 1, totalPages);
                 }
             }
 

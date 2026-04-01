@@ -234,7 +234,14 @@ public class PaperService {
                 ExtractionResult extraction = runInStep(jobId, PublicationStep.PDF_READING, () -> {
                         try {
                                 byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
-                                ExtractionResult result = pdfExtractorService.extractWithImages(pdfBytes);
+                                ExtractionResult result = pdfExtractorService.extractWithImages(
+                                                pdfBytes,
+                                                (processed, total) -> {
+                                                        if (jobId != null) {
+                                                                publicationProgressStore.updatePdfReadingProgress(jobId, processed,
+                                                                                total);
+                                                        }
+                                                });
                                 log.info("PDF 추출 완료: tempKey={}, textLength={}, imageCount={}",
                                                 request.getTempKey(), result.getText().length(),
                                                 result.getArticleImages().size());
