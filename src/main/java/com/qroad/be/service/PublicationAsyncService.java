@@ -24,7 +24,7 @@ public class PublicationAsyncService {
             PaperCreateResponseDTO response = paperService.createPaperWithArticles(request, adminId, jobId);
             Long paperId = response.getPaperId();
 
-            // 자동 finalize: temp → paper/{paperId}.pdf 로 이동 + temp 삭제
+            // 자동 finalize: temp → paper/{yyyyMMdd(id)}.pdf 로 이동 + temp 삭제
             FinalizeUploadResponse finalizeResult = s3PresignService.finalizePdfUpload(request.getTempKey(), paperId);
             // DB file_path 갱신
             paperService.updateFilePath(paperId, finalizeResult.getFinalKey());
