@@ -2,13 +2,18 @@ package com.qroad.be.controller;
 
 import com.qroad.be.dto.EmotionRequestDTO;
 import com.qroad.be.dto.EmotionResponseDTO;
+import com.qroad.be.security.UserUuidCookieFilter;
 import com.qroad.be.service.ArticleEmotionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @Slf4j
 @RestController
@@ -29,7 +34,7 @@ public class ArticleEmotionController {
             HttpServletRequest httpRequest) {
         log.info("감정 토글 API 호출 - articleId: {}, emotionType: {}", articleId, request.getEmotionType());
 
-        // 사용자 식별자 추출 (IP 주소 사용)
+        // 사용자 식별자 추출 (qroad_uid UUID 기반)
         String userIdentifier = getUserIdentifier(httpRequest);
 
         EmotionResponseDTO response = articleEmotionService.toggleEmotion(
@@ -40,30 +45,12 @@ public class ArticleEmotionController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 사용자 식별자 추출 (IP 주소 기반)
-     * 프록시 환경을 고려하여 X-Forwarded-For 헤더도 확인
-     */
     private String getUserIdentifier(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
+        Object attr = request.getAttribute(UserUuidCookieFilter.REQUEST_ATTR_USER_UUID);
+        if (attr instanceof String uuid && !uuid.isBlank()) {
+            log.debug("사용자 식별자 (UUID): {}", uuid);
+            return uuid;
         }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("HTTP_CLIENT_IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("HTTP_X_FORWARDED_FOR");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-
-        log.debug("사용자 식별자(IP): {}", ip);
-        return ip;
+        throw new IllegalStateException("qroad_uid 사용자 식별자를 찾을 수 없습니다.");
     }
 }

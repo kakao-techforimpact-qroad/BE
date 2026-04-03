@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.YearMonth;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -41,6 +42,8 @@ public class PaperController {
     public ResponseEntity<?> getPublications(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) String month,
+            @RequestParam(required = false) String q,
             @AuthenticationPrincipal AdminPrincipal admin) {
 
         Long adminId = admin != null ? admin.getAdminId() : null;
@@ -48,7 +51,18 @@ public class PaperController {
             return unauthorizedResponse();
         }
 
-        PublicationListResponse response = paperService.getPublications(page, limit, adminId);
+        YearMonth parsedMonth = null;
+        if (month != null && !month.isBlank()) {
+            try {
+                parsedMonth = YearMonth.parse(month);
+            } catch (Exception e) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("message", "month must be YYYY-MM");
+                return ResponseEntity.badRequest().body(errorResponse);
+            }
+        }
+
+        PublicationListResponse response = paperService.getPublications(page, limit, adminId, parsedMonth, q);
         return ResponseEntity.ok(response);
     }
 

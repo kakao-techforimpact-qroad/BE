@@ -1,5 +1,6 @@
 package com.qroad.be.dto;
 
+import com.qroad.be.domain.EmotionType;
 import lombok.*;
 
 import java.time.LocalDate;
@@ -26,6 +27,7 @@ public class ArticlesDetailDTO {
 
     // 감정 통계
     private EmotionStatsDTO emotionStats;
+    private EmotionType myEmotion;
 
     public ArticlesDetailDTO(Long articleId, String title, String pressCompany,
             String reporter, LocalDate publishedDate, String summary) {

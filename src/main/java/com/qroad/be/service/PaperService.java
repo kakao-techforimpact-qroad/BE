@@ -18,9 +18,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import jakarta.persistence.criteria.Predicate;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -51,11 +57,76 @@ public class PaperService {
         /**
          * API 1: 발행된 신문 리스트 조회
          */
-        public PublicationListResponse getPublications(int page, int limit, Long adminId) {
-                Pageable pageable = PageRequest.of(page - 1, limit);
+        public PublicationListResponse getPublications(int page, int limit, Long adminId, YearMonth month, String q) {
+                Pageable pageable = PageRequest.of(page - 1, limit, Sort.by(Sort.Direction.DESC, "publishedDate"));
+                LocalDate monthStart = null;
+                LocalDate monthEnd = null;
+                if (month != null) {
+                        monthStart = month.atDay(1);
+                        monthEnd = month.plusMonths(1).atDay(1);
+                }
 
-                Page<PaperEntity> paperPage = paperRepository
-                                .findByAdminIdAndStatusOrderByPublishedDateDesc(adminId, "ACTIVE", pageable);
+                String normalizedQ = StringUtils.hasText(q) ? q.trim() : null;
+                String qLikePattern = normalizedQ != null ? "%" + normalizedQ.toLowerCase() + "%" : null;
+                String qIssueLikePattern = normalizedQ != null ? "%" + normalizedQ + "%" : null;
+                LocalDate qMonthStart = null;
+                LocalDate qMonthEnd = null;
+                if (normalizedQ != null && normalizedQ.matches("^\\d{4}-\\d{2}$")) {
+                        YearMonth qMonth = YearMonth.parse(normalizedQ);
+                        qMonthStart = qMonth.atDay(1);
+                        qMonthEnd = qMonth.plusMonths(1).atDay(1);
+                }
+
+                final LocalDate finalMonthStart = monthStart;
+                final LocalDate finalMonthEnd = monthEnd;
+                final LocalDate finalQMonthStart = qMonthStart;
+                final LocalDate finalQMonthEnd = qMonthEnd;
+                final String finalQLikePattern = qLikePattern;
+                final String finalQIssueLikePattern = qIssueLikePattern;
+                final String activeStatus = "ACTIVE";
+
+                Specification<PaperEntity> spec = (root, query, cb) -> {
+                        List<Predicate> predicates = new ArrayList<>();
+                        predicates.add(cb.equal(root.get("admin").get("id"), adminId));
+                        predicates.add(cb.equal(root.get("status"), activeStatus));
+
+                        if (finalMonthStart != null) {
+                                predicates.add(cb.greaterThanOrEqualTo(root.get("publishedDate"), finalMonthStart));
+                                predicates.add(cb.lessThan(root.get("publishedDate"), finalMonthEnd));
+                        }
+
+                        if (finalQLikePattern != null) {
+                                List<Predicate> qPredicates = new ArrayList<>();
+                                // "호수 문자열(YYYY-MM)" 부분 검색: q=2026 -> 2026-02 매칭
+                                qPredicates.add(cb.like(
+                                                cb.function("to_char", String.class, root.get("publishedDate"),
+                                                                cb.literal("YYYY-MM")),
+                                                finalQIssueLikePattern));
+                                qPredicates.add(cb.like(cb.lower(root.get("title")), finalQLikePattern));
+
+                                var articleTitleExists = query.subquery(Long.class);
+                                var article = articleTitleExists.from(ArticleEntity.class);
+                                articleTitleExists.select(cb.literal(1L));
+                                articleTitleExists.where(
+                                                cb.equal(article.get("paper"), root),
+                                                cb.equal(article.get("status"), activeStatus),
+                                                cb.like(cb.lower(article.get("title")), finalQLikePattern));
+                                qPredicates.add(cb.exists(articleTitleExists));
+
+                                if (finalQMonthStart != null) {
+                                        qPredicates.add(cb.and(
+                                                        cb.greaterThanOrEqualTo(root.get("publishedDate"), finalQMonthStart),
+                                                        cb.lessThan(root.get("publishedDate"), finalQMonthEnd)));
+                                }
+
+                                predicates.add(cb.or(qPredicates.toArray(new Predicate[0])));
+                        }
+
+                        query.distinct(true);
+                        return cb.and(predicates.toArray(new Predicate[0]));
+                };
+
+                Page<PaperEntity> paperPage = paperRepository.findAll(spec, pageable);
 
                 List<PaperSummaryDto> papers = paperPage.getContent().stream()
                                 .map(PaperSummaryDto::from)
