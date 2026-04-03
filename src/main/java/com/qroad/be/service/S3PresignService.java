@@ -12,6 +12,8 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -26,6 +28,7 @@ import java.util.UUID;
 public class S3PresignService {
 
         private static final ZoneId KST_ZONE = ZoneId.of("Asia/Seoul");
+        private static final Duration DOWNLOAD_PRESIGN_DURATION = Duration.ofMinutes(10);
 
         private final S3Presigner presigner;
         private final AwsS3Properties properties;
@@ -86,6 +89,25 @@ public class S3PresignService {
                                 .build();
                 s3Client.putObject(putRequest, RequestBody.fromBytes(imageBytes));
                 return key;
+        }
+
+        public String createPresignedGetUrl(String key) {
+                if (key == null || key.isBlank()) {
+                        return null;
+                }
+
+                GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                                .bucket(properties.getBucket())
+                                .key(key)
+                                .build();
+
+                GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                                .signatureDuration(DOWNLOAD_PRESIGN_DURATION)
+                                .getObjectRequest(getObjectRequest)
+                                .build();
+
+                PresignedGetObjectRequest presignedRequest = presigner.presignGetObject(presignRequest);
+                return presignedRequest.url().toString();
         }
 
         /**
