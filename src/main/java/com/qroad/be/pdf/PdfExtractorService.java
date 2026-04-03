@@ -90,11 +90,12 @@ public class PdfExtractorService {
     public ExtractionResult extractWithImages(byte[] pdfBytes, BiConsumer<Integer, Integer> progressCallback) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
             List<PdfArticle> allArticles = new ArrayList<>();
+            int totalPages = document.getNumberOfPages();
             // 페이지별 내장 이미지 목록 보관 맵
             Map<Integer, List<ImagePositionExtractor.ImageBoundingBox>> pageImagesMap = new HashMap<>();
             ImagePositionExtractor imageExtractor = new ImagePositionExtractor();
 
-            for (int pi = 0; pi < document.getNumberOfPages(); pi++) {
+            for (int pi = 0; pi < totalPages; pi++) {
                 PDPage page = document.getPage(pi);
                 // 미리 이 페이지에 있는 모든 객체 이미지 추출 좌표 확보
                 List<ImagePositionExtractor.ImageBoundingBox> pImgs = imageExtractor.extract(page);

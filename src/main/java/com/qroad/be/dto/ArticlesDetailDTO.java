@@ -20,6 +20,7 @@ public class ArticlesDetailDTO {
     private LocalDate publishedDate;
     private String summary;
     private String imagePath;
+    private String imageUrl;
 
     private List<ArticleRelatedDTO> articleRelatedDTOS;
     private List<PolicyArticleRelatedDTO> policyArticleRelatedDTOS;

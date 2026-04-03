@@ -23,6 +23,7 @@ public class ArticleService {
         private final ArticleRelatedRepository articleRelatedRepository;
         private final ArticlePolicyRelatedRepository articlePolicyRelatedRepository;
         private final ArticleEmotionService articleEmotionService;
+        private final S3PresignService s3PresignService;
 
         public ArticlesDetailDTO getArticleDetail(Long articleId, String userIdentifier) {
 
@@ -35,6 +36,10 @@ public class ArticleService {
                 List<ArticleRelatedDTO> relatedArticles = articleRelatedRepository.findArticlesByArticleId(articleId);
 
                 if (relatedArticles != null && !relatedArticles.isEmpty()) {
+                        for (ArticleRelatedDTO relatedArticle : relatedArticles) {
+                                relatedArticle.setImageUrl(
+                                                s3PresignService.createPresignedGetUrl(relatedArticle.getImagePath()));
+                        }
                         dto.setArticleRelatedDTOS(relatedArticles);
                 }
 
@@ -57,6 +62,7 @@ public class ArticleService {
                 // 5. 키워드 추출 추가
                 List<String> keywords = articleRepository.findKeywordNamesByArticleId(articleId);
                 dto.setKeywords(keywords);
+                dto.setImageUrl(s3PresignService.createPresignedGetUrl(dto.getImagePath()));
 
                 return dto;
         }
