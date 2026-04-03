@@ -40,6 +40,18 @@ public class PdfExtractorService {
             .compile("^\\d{1,3}\\s+|\\s+\\d{1,3}$");
     private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
 
+    // 광고 판별 패턴
+    // 전화번호: 02-1234-5678 / 010-1234-5678 / (02)1234-5678 형태
+    private static final Pattern PHONE_PATTERN = Pattern.compile(
+            "\\(?\\d{2,3}\\)?[-.]\\d{3,4}[-.]\\d{4}");
+    // URL
+    private static final Pattern URL_PATTERN = Pattern.compile(
+            "(?i)www\\.|http[s]?://");
+    // 광고 전용 키워드 — 뉴스 기사에 거의 등장하지 않는 표현만 선별
+    // (문의/신청/입주 등 일반 단어는 제외: 기사 본문에도 자주 등장)
+    private static final Pattern AD_EXCLUSIVE_KEYWORD = Pattern.compile(
+            "선\\s*착\\s*순|분\\s*양\\s*안\\s*내|입\\s*주\\s*문\\s*의|할\\s*인\\s*이\\s*벤\\s*트|모\\s*집\\s*공\\s*고|대표\\s*번호");
+
     // ──────────────────────── public entry point ────────────────────────
 
     /**
@@ -178,6 +190,28 @@ public class PdfExtractorService {
         public byte[] getImageBytes() { return imageBytes; }
     }
 
+    // ──────────────────────── ad detection ────────────────────────
+
+    /**
+     * 본문 텍스트가 광고일 가능성이 높은지 판단합니다.
+     *
+     * 강한 신호 (하나라도 있으면 광고):
+     *   - 전화번호 패턴 (02-xxx, 010-xxx 등)
+     *   - URL (www., http)
+     *
+     * 약한 신호 (2개 이상이면 광고):
+     *   - 광고성 키워드 (문의, 모집, 분양, 할인, TEL 등)
+     */
+    private boolean isLikelyAd(String body) {
+        boolean hasPhone = PHONE_PATTERN.matcher(body).find();
+        boolean hasUrl   = URL_PATTERN.matcher(body).find();
+        boolean hasExclusiveKw = AD_EXCLUSIVE_KEYWORD.matcher(body).find();
+
+        // 강한 신호 2개 이상: 전화번호+URL, 전화번호+광고전용키워드, URL+광고전용키워드
+        int strongSignals = (hasPhone ? 1 : 0) + (hasUrl ? 1 : 0) + (hasExclusiveKw ? 1 : 0);
+        return strongSignals >= 2;
+    }
+
     // ──────────────────────── title detection ────────────────────────
 
     private boolean isProbableTitle(Line line, double bodyMedian) {
@@ -186,8 +220,11 @@ public class PdfExtractorService {
         if (t.length() < 3 || t.length() > 80)
             return false;
 
-        // PDFBox reports slightly larger font sizes than PyMuPDF; use 1.38x to match
-        if (line.getMaxSize() < Math.max(bodyMedian * 1.38, 12.5))
+        // 비볼드: 원래 검증된 1.38 배율 유지 (소제목 오인식 방지)
+        // 볼드:   1.15 배율 허용 (볼드 자체가 강한 제목 신호이므로 완화)
+        double ratioThreshold = line.isBold() ? 1.15 : 1.38;
+        double absThreshold   = line.isBold() ? 10.5 : 12.5;
+        if (line.getMaxSize() < Math.max(bodyMedian * ratioThreshold, absThreshold))
             return false;
 
         if (t.length() < 20) {
@@ -216,7 +253,7 @@ public class PdfExtractorService {
     // ──────────────────────── column inference ────────────────────────
 
     private List<Double> inferColumnSplits(List<Double> xs, double pageWidth) {
-        if (xs.size() < 8)
+        if (xs.size() < 4)
             return Collections.emptyList();
 
         List<Double> sorted = new ArrayList<>(xs);
@@ -422,8 +459,10 @@ public class PdfExtractorService {
                         .collect(Collectors.joining("\n")).trim();
 
                 // 본문 텍스트가 너무 짧으면 광고/이미지 영역으로 판단하고 건너뜀
-                // 30자 미만: 의미있는 기사 본문이 될 수 없음 (광고, 이미지, 소제목 등)
-                if (text.length() < 30) continue;
+                if (text.length() < 50) continue;
+
+                // 전화번호·URL·광고성 키워드 기반 광고 필터
+                if (isLikelyAd(text)) continue;
 
                 Integer contTo = detectContinuation(text);
 
