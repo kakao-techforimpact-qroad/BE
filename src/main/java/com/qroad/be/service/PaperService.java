@@ -145,10 +145,13 @@ public class PaperService {
                                 .orElseThrow(() -> new RuntimeException("?좊Ц??李얠쓣 ???놁뒿?덈떎."));
 
                 List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
+                Map<Long, List<String>> keywordsByArticleId = getKeywordsForArticles(articles);
 
                 List<ArticleDto> articleDtos = articles.stream()
                                 .map(article -> {
-                                        List<String> keywords = getKeywordsForArticle(article.getId());
+                                        List<String> keywords = keywordsByArticleId.getOrDefault(
+                                                        article.getId(),
+                                                        Collections.emptyList());
                                         return ArticleDto.builder()
                                                         .id(article.getId())
                                                         .title(article.getTitle())
@@ -162,10 +165,30 @@ public class PaperService {
                 return PublicationDetailResponse.from(paper, articleDtos);
         }
 
+        private Map<Long, List<String>> getKeywordsForArticles(List<ArticleEntity> articles) {
+                if (articles == null || articles.isEmpty()) {
+                        return Collections.emptyMap();
+                }
+
+                List<Long> articleIds = articles.stream()
+                                .map(ArticleEntity::getId)
+                                .toList();
+
+                List<Object[]> rows = articleKeywordRepository.findArticleIdAndKeywordNameByArticleIds(articleIds);
+
+                Map<Long, List<String>> keywordsByArticleId = new HashMap<>();
+                for (Object[] row : rows) {
+                        Long articleId = ((Number) row[0]).longValue();
+                        String keywordName = (String) row[1];
+                        keywordsByArticleId
+                                        .computeIfAbsent(articleId, ignored -> new ArrayList<>())
+                                        .add(keywordName);
+                }
+                return keywordsByArticleId;
+        }
+
         private List<String> getKeywordsForArticle(Long articleId) {
-                return articleKeywordRepository.findByArticle_Id(articleId).stream()
-                                .map(ak -> ak.getKeyword().getName())
-                                .collect(Collectors.toList());
+                return articleRepository.findKeywordNamesByArticleId(articleId);
         }
 
         /**
