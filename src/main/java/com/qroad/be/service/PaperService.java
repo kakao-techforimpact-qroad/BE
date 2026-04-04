@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
-import com.qroad.be.pdf.PdfExtractorService.ArticleImageData;
 
 @Slf4j
 @Service
@@ -115,7 +114,8 @@ public class PaperService {
 
                                 if (finalQMonthStart != null) {
                                         qPredicates.add(cb.and(
-                                                        cb.greaterThanOrEqualTo(root.get("publishedDate"), finalQMonthStart),
+                                                        cb.greaterThanOrEqualTo(root.get("publishedDate"),
+                                                                        finalQMonthStart),
                                                         cb.lessThan(root.get("publishedDate"), finalQMonthEnd)));
                                 }
 
@@ -270,21 +270,9 @@ public class PaperService {
                 PaperEntity savedPaper = paperRepository.save(paper);
                 log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
-                // 기사별 이미지를 S3에 업로드하고 제목→S3 key 맵을 생성
-                // 나중에 LLM이 반환한 기사 제목과 매핑할 때 사용
-                Map<String, String> titleToImageKey = new HashMap<>();
-                List<ArticleImageData> articleImages = extraction.getArticleImages();
-                for (int i = 0; i < articleImages.size(); i++) {
-                        ArticleImageData img = articleImages.get(i);
-                        try {
-                                String key = String.format("article-image/%d/%d.jpg", savedPaper.getId(), i);
-                                s3PresignService.uploadImage(img.getImageBytes(), key);
-                                titleToImageKey.put(img.getTitle(), key);
-                                log.info("기사 이미지 업로드 완료: key={}", key);
-                        } catch (Exception e) {
-                                log.warn("기사 이미지 업로드 실패 (무시하고 계속): title={}", img.getTitle(), e);
-                        }
-                }
+                // 기사별 이미지를 S3에 업로드하고 제목→S3 key 맵을 생성 (주석 처리됨)
+                // AI 이미지를 카테고리별로 매핑하게 되면서 더 이상 PDF 이미지를 추출/업로드하지 않습니다.
+                // 기존 PDF 내 이미지 추출을 S3에 업로드하는 로직 제거됨
 
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
                                 jobId,
@@ -294,7 +282,8 @@ public class PaperService {
                                                 return llmService.chunkAndAnalyzePaper(
                                                                 content,
                                                                 (processed, total) -> publicationProgressStore
-                                                                                .updateChunkingProgress(jobId, processed, total));
+                                                                                .updateChunkingProgress(jobId,
+                                                                                                processed, total));
                                         }
                                         return llmService.chunkAndAnalyzePaper(content);
                                 });
@@ -310,8 +299,8 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
-                                // PDF에서 추출한 이미지와 LLM이 분석한 기사 제목을 매핑
-                                String imagePath = findImageKey(chunk.getTitle(), titleToImageKey);
+                                // 카테고리 기사 AI 이미지를 매핑
+                                String imagePath = getCategoryImage(chunk.getCategory());
 
                                 ArticleEntity article = ArticleEntity.builder()
                                                 .title(chunk.getTitle())
@@ -624,30 +613,29 @@ public class PaperService {
         }
 
         /**
-         * PDF에서 추출한 기사 제목과 LLM이 분석한 기사 제목을 비교해 S3 이미지 key를 반환합니다.
-         *
-         * 매핑 전략:
-         * 1단계 - 완전 일치 (대소문자/공백 무시)
-         * 2단계 - 부분 일치 (한쪽 제목이 다른 쪽을 포함)
-         * 매핑 실패 시 null 반환 → 이미지 없는 기사로 저장됨
+         * LLM이 분류한 카테고리에 맞는 미리 만들어진 AI 이미지 경로(S3 Key)를 반환합니다.
          */
-        private String findImageKey(String articleTitle, Map<String, String> titleToImageKey) {
-                if (articleTitle == null || titleToImageKey.isEmpty()) return null;
-                String normalized = articleTitle.trim().toLowerCase();
-                // 1단계: 완전 일치
-                for (Map.Entry<String, String> entry : titleToImageKey.entrySet()) {
-                        if (entry.getKey().trim().toLowerCase().equals(normalized)) {
-                                return entry.getValue();
-                        }
-                }
-                // 2단계: 부분 일치
-                for (Map.Entry<String, String> entry : titleToImageKey.entrySet()) {
-                        String key = entry.getKey().trim().toLowerCase();
-                        if (key.contains(normalized) || normalized.contains(key)) {
-                                return entry.getValue();
-                        }
-                }
-                return null;
+        private String getCategoryImage(String category) {
+                if (category == null)
+                        return "ai-images/placeholder.png";
+
+                return switch (category) {
+                        case "지방 행정" -> "ai-images/지방 행정.png";
+                        case "지역 정치" -> "ai-images/지역 정치.png";
+                        case "공공 기관" -> "ai-images/공공 기관.png";
+                        case "지역 산업" -> "ai-images/지역 산업.png";
+                        case "소상공인 및 시장" -> "ai-images/소상공인 및 시장.png";
+                        case "부동산 및 개발" -> "ai-images/부동산 및 개발.png";
+                        case "사건-사고" -> "ai-images/사건-사고.png";
+                        case "시민 사회" -> "ai-images/시민 사회.png";
+                        case "교육 및 보건" -> "ai-images/교육 및 보건.png";
+                        case "문화-예술" -> "ai-images/문화-예술.png";
+                        case "여행-명소" -> "ai-images/여행-명소.png";
+                        case "생활 스포츠" -> "ai-images/생활 스포츠.png";
+                        case "지역 인물" -> "ai-images/지역 인물.png";
+                        case "독자 목소리" -> "ai-images/독자 목소리.png";
+                        default -> "ai-images/placeholder.png";
+                };
         }
 
         /**

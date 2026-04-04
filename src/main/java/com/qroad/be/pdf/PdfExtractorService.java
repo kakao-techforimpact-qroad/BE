@@ -3,7 +3,8 @@ package com.qroad.be.pdf;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.rendering.PDFRenderer;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -28,8 +29,20 @@ import java.util.stream.Collectors;
 @Service
 public class PdfExtractorService {
 
+    private final OcrService ocrService;
+
+    @Autowired
+    public PdfExtractorService(OcrService ocrService) {
+        this.ocrService = ocrService;
+    }
+
     private static final List<String> BAD_KEYWORDS = List.of(
             "발행", "면", "제 ", "호", "www", "http", "기자", "전화", "팩스");
+    // 광고 판별용 키워드 — 본문이 짧으면서 이 단어가 있으면 광고로 간주
+    private static final List<String> AD_KEYWORDS = List.of(
+            "문의", "할인", "특가", "예약", "판매", "분양", "임대", "모집", "상담",
+            "전화", "TEL", "tel", "FAX", "팩스", "가격", "원(", "만원", "% 할인",
+            "구인", "구직", "채용", "클리닉", "산후조리");
     // Page header/section patterns like "2 행정", "종합 5" (short 1-3 char section
     // names)
     // Allows longer section names like "우리동네", "동네방네" (4+ chars) to pass as titles
@@ -40,6 +53,9 @@ public class PdfExtractorService {
     private static final java.util.regex.Pattern PAGE_NUM_STRIP = java.util.regex.Pattern
             .compile("^\\d{1,3}\\s+|\\s+\\d{1,3}$");
     private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
+
+    // OCR 텍스트 내 전화번호 형태 매칭 (예: 000-0000-0000, 043-000-0000, 043)000-0000)
+    private static final Pattern PHONE_PATTERN = Pattern.compile("\\d{2,3}\\s*[-)]\\s*\\d{3,4}\\s*-\\s*\\d{4}");
 
     // ──────────────────────── public entry point ────────────────────────
 
@@ -74,9 +90,16 @@ public class PdfExtractorService {
     public ExtractionResult extractWithImages(byte[] pdfBytes, BiConsumer<Integer, Integer> progressCallback) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
             List<PdfArticle> allArticles = new ArrayList<>();
-            int totalPages = document.getNumberOfPages();
+            // 페이지별 내장 이미지 목록 보관 맵
+            Map<Integer, List<ImagePositionExtractor.ImageBoundingBox>> pageImagesMap = new HashMap<>();
+            ImagePositionExtractor imageExtractor = new ImagePositionExtractor();
 
-            for (int pi = 0; pi < totalPages; pi++) {
+            for (int pi = 0; pi < document.getNumberOfPages(); pi++) {
+                PDPage page = document.getPage(pi);
+                // 미리 이 페이지에 있는 모든 객체 이미지 추출 좌표 확보
+                List<ImagePositionExtractor.ImageBoundingBox> pImgs = imageExtractor.extract(page);
+                pageImagesMap.put(pi, new ArrayList<>(pImgs));
+
                 List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
                 int idx = 1;
                 for (PdfArticle a : pageArticles) {
@@ -100,55 +123,20 @@ public class PdfExtractorService {
                 sb.append(a.getText().trim()).append("\n\n\n");
             }
 
-            // 기사별 이미지 추출 (bodyBbox 영역 crop)
+            // 기사별 이미지 추출 (bodyBbox 안에 걸쳐있는 원래 사진 객체 찾기)
+            // AI 카테고리 이미지 매핑 기능으로 변경됨에 따라 PDF 이미지 추출 로직을 비활성화합니다.
             List<ArticleImageData> images = new ArrayList<>();
+            /*
             for (PdfArticle a : allArticles) {
-                try {
-                    byte[] imageBytes = cropPageRegion(document, a.getPage() - 1, a.getBodyBbox(), 150);
-                    if (imageBytes != null) {
-                        images.add(new ArticleImageData(a.getTitle().trim(), imageBytes));
-                    }
-                } catch (Exception e) {
-                    // 이미지 추출 실패해도 전체 흐름은 계속 진행
-                }
+                // (기존 이미지 추출 로직 생략) 
             }
+            */
 
             return new ExtractionResult(sb.toString(), images);
         }
     }
 
-    /**
-     * PDF 특정 페이지의 지정 영역(bbox)을 JPEG 이미지로 잘라서 반환합니다.
-     *
-     * @param document   로드된 PDF 문서
-     * @param pageIndex  0-based 페이지 번호
-     * @param bbox       자를 영역 {x0, y0, x1, y1} (PDF 포인트 단위)
-     * @param dpi        렌더링 해상도 (150 = 웹용, 300 = 고화질)
-     */
-    private byte[] cropPageRegion(PDDocument document, int pageIndex, double[] bbox, float dpi) throws IOException {
-        PDFRenderer renderer = new PDFRenderer(document);
-        BufferedImage fullPage = renderer.renderImageWithDPI(pageIndex, dpi);
 
-        // PDF 포인트 → 픽셀 변환 (기본 72dpi 기준)
-        float scale = dpi / 72f;
-        int x = (int) (bbox[0] * scale);
-        int y = (int) (bbox[1] * scale);
-        int w = (int) ((bbox[2] - bbox[0]) * scale);
-        int h = (int) ((bbox[3] - bbox[1]) * scale);
-
-        // 이미지 경계를 넘지 않도록 보정
-        x = Math.max(0, x);
-        y = Math.max(0, y);
-        w = Math.min(w, fullPage.getWidth() - x);
-        h = Math.min(h, fullPage.getHeight() - y);
-
-        if (w <= 0 || h <= 0) return null;
-
-        BufferedImage cropped = fullPage.getSubimage(x, y, w, h);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        ImageIO.write(cropped, "JPEG", out);
-        return out.toByteArray();
-    }
 
     // ──────────────────────── result classes ────────────────────────
 
