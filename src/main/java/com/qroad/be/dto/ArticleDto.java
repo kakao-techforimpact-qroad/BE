@@ -14,4 +14,5 @@ public class ArticleDto {
     private String summary;
     private List<String> keywords;
     private String imagePath;
+    private String imageUrl;
 }
