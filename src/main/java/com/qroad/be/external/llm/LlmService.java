@@ -84,6 +84,7 @@ public class LlmService {
                         .reporter(analysis.getReporter())
                         .summary(analysis.getSummary())
                         .keywords(analysis.getKeywords())
+                        .category(analysis.getCategory())
                         .build();
 
                 articles.add(article);
@@ -181,12 +182,13 @@ public class LlmService {
             String summary = (String) result.getOrDefault("summary", "");
             @SuppressWarnings("unchecked")
             List<String> keywords = (List<String>) result.getOrDefault("keywords", new ArrayList<>());
+            String category = (String) result.getOrDefault("category", "기타");
 
-            return new ArticleAnalysisResult(title, reporter, summary, keywords);
+            return new ArticleAnalysisResult(title, reporter, summary, keywords, category);
 
         } catch (Exception e) {
             log.error("기사 분석 중 오류 발생", e);
-            return new ArticleAnalysisResult("", "", "", new ArrayList<>());
+            return new ArticleAnalysisResult("", "", "", new ArrayList<>(), "기타");
         }
     }
 
@@ -256,9 +258,16 @@ public class LlmService {
                 2. 기자 이름 추출 ("홍길동 기자", "홍길동 hong@example.com" 형식에서 이름만. 없으면 빈 문자열)
                 3. 기사 내용을 2-3문장으로 요약
                 4. 핵심 키워드 3개 추출 (단어 또는 짧은 구문)
+                5. 기사의 카테고리 분류 (반드시 다음 중 하나 선택: '지방 행정', '지역 정치', '공공 기관', '지역 산업', '소상공인 및 시장', '부동산 및 개발', '사건-사고', '시민 사회', '교육 및 보건', '문화-예술', '여행-명소', '생활 스포츠', '지역 인물', '독자 목소리')
 
-                코드 블록 없이 순수 JSON만 응답하세요:
-                {"title": "...", "reporter": "...", "summary": "...", "keywords": ["...", "...", "..."]}
+                반드시 다음과 같은 JSON 형식으로 응답해주세요:
+                {
+                  "title": "기사 제목",
+                  "reporter": "기자 이름",
+                  "summary": "요약문...",
+                  "keywords": ["키워드1", "키워드2", "키워드3"],
+                  "category": "분류된 카테고리"
+                }
                 """, body, titleInstruction);
     }
 
@@ -270,12 +279,14 @@ public class LlmService {
         private final String reporter;
         private final String summary;
         private final List<String> keywords;
+        private final String category;
 
-        public ArticleAnalysisResult(String title, String reporter, String summary, List<String> keywords) {
+        public ArticleAnalysisResult(String title, String reporter, String summary, List<String> keywords, String category) {
             this.title = title;
             this.reporter = reporter;
             this.summary = summary;
             this.keywords = keywords;
+            this.category = category;
         }
 
         public String getTitle() {
@@ -292,6 +303,10 @@ public class LlmService {
 
         public List<String> getKeywords() {
             return keywords;
+        }
+
+        public String getCategory() {
+            return category;
         }
     }
 }
