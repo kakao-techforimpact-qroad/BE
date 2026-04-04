@@ -39,6 +39,10 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
+        private static final Set<String> AD_CATEGORIES = Set.of(
+                "광고·홍보", "채용·모집 공고", "입찰·행정 공고"
+        );
+
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
         // private final QrCodeRepository qrCodeRepository; // QR 코드 기능 비활성화
@@ -292,6 +296,13 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                                // 광고·홍보·공고 카테고리 기사 저장 제외
+                                if (AD_CATEGORIES.contains(chunk.getCategory())) {
+                                        log.info("광고/공고 카테고리 저장 제외: title={}, category={}",
+                                                chunk.getTitle(), chunk.getCategory());
+                                        continue;
+                                }
+
                                 // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
 
