@@ -16,11 +16,16 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class S3PresignService {
+
+        private static final ZoneId KST_ZONE = ZoneId.of("Asia/Seoul");
 
         private final S3Presigner presigner;
         private final AwsS3Properties properties;
@@ -46,7 +51,8 @@ public class S3PresignService {
         }
 
         public FinalizeUploadResponse finalizePdfUpload(String tempKey, Long publicationId) {
-                String finalKey = "paper/" + publicationId + ".pdf";
+                String today = LocalDate.now(KST_ZONE).format(DateTimeFormatter.BASIC_ISO_DATE);
+                String finalKey = "paper/" + today + "(" + publicationId + ").pdf";
 
                 CopyObjectRequest copyRequest = CopyObjectRequest.builder()
                                 .sourceBucket(properties.getBucket())

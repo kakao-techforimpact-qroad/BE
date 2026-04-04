@@ -366,12 +366,7 @@ public class PaperService {
                                  * }
                                  */
 
-                                runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
-                                        // 연관 기사 생성
-                                        updateRelatedArticles(savedArticle.getId(), savedKeywords);
-                                        // 연관 정책 생성
-                                        updateRelatedPolicies(savedArticle.getId(), savedKeywords);
-                                });
+                                // 연관 항목 생성은 FINDING_RELATED 단계에서 별도 진행
 
                                 // 응답 DTO 생성
                                 com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
@@ -383,6 +378,15 @@ public class PaperService {
                                                 .build();
 
                                 articleResponses.add(articleResponse);
+                        }
+                });
+
+                runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
+                        for (com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse : articleResponses) {
+                                // 저장된 키워드 기준 연관 기사/정책 생성
+                                updateRelatedArticles(articleResponse.getId(), articleResponse.getKeywords());
+                                updateRelatedPolicies(articleResponse.getId(), articleResponse.getKeywords());
+
                                 int processed = relatedProcessed.incrementAndGet();
                                 if (jobId != null) {
                                         publicationProgressStore.updateRelatedProgress(jobId, processed, totalChunks);
