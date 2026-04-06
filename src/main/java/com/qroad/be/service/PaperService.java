@@ -317,6 +317,9 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
                 });
+                if (articleChunks == null) {
+                        articleChunks = new ArrayList<>();
+                }
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 final AdminEntity finalAdmin = admin;
@@ -338,11 +341,18 @@ public class PaperService {
                                 // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
 
+                                String safeTitle = chunk.getTitle() != null && chunk.getTitle().length() > 255
+                                                ? chunk.getTitle().substring(0, 255)
+                                                : chunk.getTitle();
+                                String safeReporter = chunk.getReporter() != null && chunk.getReporter().length() > 100
+                                                ? chunk.getReporter().substring(0, 100)
+                                                : chunk.getReporter();
+
                                 ArticleEntity article = ArticleEntity.builder()
-                                                .title(chunk.getTitle())
+                                                .title(safeTitle != null ? safeTitle : "")
                                                 .content(chunk.getContent())
                                                 .summary(chunk.getSummary())
-                                                .reporter(chunk.getReporter())
+                                                .reporter(safeReporter)
                                                 .link("") // 기본값
                                                 .status("ACTIVE")
                                                 .paper(savedPaper)
@@ -355,10 +365,14 @@ public class PaperService {
                                                 savedArticle.getId(), savedArticle.getTitle(), adminId);
 
                                 List<String> savedKeywords = new ArrayList<>();
-                                for (String keywordName : chunk.getKeywords()) {
-                                        if (keywordName == null || keywordName.trim().isEmpty()) {
-                                                continue;
-                                        }
+                                List<String> uniqueKeywordNames = chunk.getKeywords() == null
+                                                ? new ArrayList<>()
+                                                : chunk.getKeywords().stream()
+                                                                .filter(k -> k != null && !k.trim().isEmpty())
+                                                                .map(String::trim)
+                                                                .distinct()
+                                                                .collect(Collectors.toList());
+                                for (String keywordName : uniqueKeywordNames) {
 
                                         // 키워드 존재 여부 확인 후 저장
                                         com.qroad.be.domain.KeywordEntity keyword = keywordRepository
@@ -487,6 +501,10 @@ public class PaperService {
                         log.error("연관 기사 생성을 위한 임베딩 실패: articleId={}", articleId, e);
                         return;
                 }
+                if (embedding == null || embedding.isEmpty()) {
+                        log.warn("연관 기사 임베딩 결과 없음: articleId={}", articleId);
+                        return;
+                }
                 String vectorString = embedding.toString();
 
                 // 3. 벡터 유사도 검색 (L2 거리 기준, 자기 자신 제외, 상위 3개)
@@ -506,8 +524,11 @@ public class PaperService {
 
                 // 4. 연관 기사 저장
                 for (Map<String, Object> row : rows) {
-                        Long relatedArticleId = ((Number) row.get("article_id")).longValue();
-                        Double distance = ((Number) row.get("distance")).doubleValue();
+                        Object rawArticleId = row.get("article_id");
+                        Object rawDistance = row.get("distance");
+                        if (rawArticleId == null || rawDistance == null) continue;
+                        Long relatedArticleId = ((Number) rawArticleId).longValue();
+                        Double distance = ((Number) rawDistance).doubleValue();
                         // 유사도 점수 변환 (거리가 0이면 유사도 1, 거리가 멀수록 0에 수렴하도록)
                         // 간단하게 1 / (1 + distance) 사용하거나, 그냥 distance 저장 (여기서는 distance가 작을수록 유사함)
                         // ArticleRelatedEntity의 score는 높을수록 유사한 것으로 가정하면 변환 필요.
@@ -553,6 +574,10 @@ public class PaperService {
                         embedding = llmService.getEmbedding(keywordText);
                 } catch (Exception e) {
                         log.error("연관 정책 생성을 위한 임베딩 실패: articleId={}", articleId, e);
+                        return;
+                }
+                if (embedding == null || embedding.isEmpty()) {
+                        log.warn("연관 정책 임베딩 결과 없음: articleId={}", articleId);
                         return;
                 }
                 String vectorString = embedding.toString();
