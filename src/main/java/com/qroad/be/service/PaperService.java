@@ -301,7 +301,7 @@ public class PaperService {
                 // AI 이미지를 카테고리별로 매핑하게 되면서 더 이상 PDF 이미지를 추출/업로드하지 않습니다.
                 // 기존 PDF 내 이미지 추출을 S3에 업로드하는 로직 제거됨
 
-                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
+                List<com.qroad.be.dto.ArticleChunkDTO> rawChunks = runInStep(
                                 jobId,
                                 PublicationStep.CHUNKING_AND_ANALYZING,
                                 () -> {
@@ -317,9 +317,8 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
                 });
-                if (articleChunks == null) {
-                        articleChunks = new ArrayList<>();
-                }
+                final List<com.qroad.be.dto.ArticleChunkDTO> articleChunks =
+                                (rawChunks != null) ? rawChunks : new ArrayList<>();
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 final AdminEntity finalAdmin = admin;
