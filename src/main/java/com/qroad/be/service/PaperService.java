@@ -637,13 +637,18 @@ public class PaperService {
 
                 // 키워드 수정
                 if (request.getKeywords() != null) {
+                        List<String> uniqueUpdateKeywords = request.getKeywords().stream()
+                                        .filter(k -> k != null && !k.trim().isEmpty())
+                                        .map(String::trim)
+                                        .distinct()
+                                        .collect(Collectors.toList());
+
+                        if (!uniqueUpdateKeywords.isEmpty()) {
                         // 기존 키워드 매핑 삭제
                         articleKeywordRepository.deleteByArticleId(articleId);
 
                         // 새 키워드 저장 및 매핑
-                        for (String keywordName : request.getKeywords()) {
-                                if (keywordName == null || keywordName.trim().isEmpty())
-                                        continue;
+                        for (String keywordName : uniqueUpdateKeywords) {
 
                                 com.qroad.be.domain.KeywordEntity keyword = keywordRepository
                                                 .findByName(keywordName.trim())
@@ -659,9 +664,10 @@ public class PaperService {
                         }
 
                         // 연관 기사 업데이트
-                        updateRelatedArticles(articleId, request.getKeywords());
+                        updateRelatedArticles(articleId, uniqueUpdateKeywords);
                         // 연관 정책 업데이트
-                        updateRelatedPolicies(articleId, request.getKeywords());
+                        updateRelatedPolicies(articleId, uniqueUpdateKeywords);
+                        } // end if (!uniqueUpdateKeywords.isEmpty())
                 }
 
                 ArticleEntity savedArticle = articleRepository.save(article);
