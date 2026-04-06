@@ -39,6 +39,11 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
+        // LLM이 반환하는 비기사 카테고리 정확한 명칭 (exact match)
+        private static final Set<String> NON_ARTICLE_CATEGORIES = Set.of(
+                "광고·홍보", "채용·모집 공고", "입찰·행정 공고"
+        );
+        // LLM이 변형된 형식으로 반환할 경우 대비 키워드 폴백 (contains match)
         private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
                 "광고", "홍보", "공고", "채용", "모집", "입찰"
         );
@@ -329,11 +334,12 @@ public class PaperService {
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
-                                boolean isAdCategory = AD_CATEGORY_KEYWORDS.stream()
-                                                .anyMatch(kw -> chunk.getCategory().contains(kw));
+                                String category = chunk.getCategory() != null ? chunk.getCategory() : "";
+                                boolean isAdCategory = NON_ARTICLE_CATEGORIES.contains(category)
+                                                || AD_CATEGORY_KEYWORDS.stream().anyMatch(category::contains);
                                 if (isAdCategory) {
-                                        log.info("광고/홍보/공고 카테고리 저장 제외: title={}, category={}",
-                                                chunk.getTitle(), chunk.getCategory());
+                                        log.info("비기사/광고/공고 카테고리 저장 제외: title={}, category={}",
+                                                chunk.getTitle(), category);
                                         continue;
                                 }
 
