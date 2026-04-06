@@ -47,6 +47,10 @@ public class PaperService {
         private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
                 "광고", "홍보", "공고", "채용", "모집", "입찰"
         );
+        // 카테고리 오분류 시 제목 기반 2차 필터 (단독 단어는 오탐 가능성으로 복합어만 사용)
+        private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
+                "모집공고", "직원모집", "채용공고", "구인공고"
+        );
 
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
@@ -335,11 +339,14 @@ public class PaperService {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
                                 String category = chunk.getCategory() != null ? chunk.getCategory() : "";
+                                String title = chunk.getTitle() != null ? chunk.getTitle() : "";
                                 boolean isAdCategory = NON_ARTICLE_CATEGORIES.contains(category)
                                                 || AD_CATEGORY_KEYWORDS.stream().anyMatch(category::contains);
-                                if (isAdCategory) {
-                                        log.info("비기사/광고/공고 카테고리 저장 제외: title={}, category={}",
-                                                chunk.getTitle(), category);
+                                boolean isNonArticleTitle = NON_ARTICLE_TITLE_KEYWORDS.stream()
+                                                .anyMatch(title::contains);
+                                if (isAdCategory || isNonArticleTitle) {
+                                        log.info("비기사/광고/공고 저장 제외: title={}, category={}",
+                                                title, category);
                                         continue;
                                 }
 
