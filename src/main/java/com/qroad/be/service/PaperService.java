@@ -39,8 +39,8 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
-        private static final Set<String> AD_CATEGORIES = Set.of(
-                "광고·홍보", "채용·모집 공고", "입찰·행정 공고"
+        private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
+                "광고", "홍보", "공고", "채용", "모집", "입찰"
         );
 
         private final PaperRepository paperRepository;
@@ -327,8 +327,10 @@ public class PaperService {
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
-                                if (AD_CATEGORIES.contains(chunk.getCategory())) {
-                                        log.info("광고/공고 카테고리 저장 제외: title={}, category={}",
+                                boolean isAdCategory = AD_CATEGORY_KEYWORDS.stream()
+                                                .anyMatch(kw -> chunk.getCategory().contains(kw));
+                                if (isAdCategory) {
+                                        log.info("광고/홍보/공고 카테고리 저장 제외: title={}, category={}",
                                                 chunk.getTitle(), chunk.getCategory());
                                         continue;
                                 }
