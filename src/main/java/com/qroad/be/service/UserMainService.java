@@ -20,11 +20,15 @@ public class UserMainService {
     // private final QrCodeRepository qrCodeRepository; // QR 코드 기능 비활성화
     private final PaperRepository paperRepository;
     private final ArticleRepository articleRepository;
+    private final S3PresignService s3PresignService;
 
     public UserMainDTO getPagerById(Long paperId) {
 
         LocalDate publishedDate = paperRepository.findPublishedDateById(paperId);
         List<ArticleSimpleDTO> articles = articleRepository.findArticlesByPaperId(paperId);
+        for (ArticleSimpleDTO article : articles) {
+            article.setImageUrl(s3PresignService.createPresignedGetUrl(article.getImagePath()));
+        }
 
         return new UserMainDTO(articles.size(), publishedDate, articles);
     }
