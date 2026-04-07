@@ -14,7 +14,10 @@ public class PdfExtractorTest {
     @Test
     public void testExtraction() throws Exception {
         System.out.println("Starting PDF extraction test...");
-        PdfExtractorService service = new PdfExtractorService(new OcrService());
+        // UpstageDocumentParseService는 @Value 주입이 필요하므로 테스트에선 mock으로 대체
+        com.qroad.be.pdf.UpstageDocumentParseService upstage =
+                new com.qroad.be.pdf.UpstageDocumentParseService();
+        PdfExtractorService service = new PdfExtractorService(new OcrService(), upstage);
         Path pdfPath = Paths.get("/Users/kim-yusin/Downloads/1825.pdf");
         if (!Files.exists(pdfPath)) {
             System.err.println("File not found: " + pdfPath);

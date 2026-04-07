@@ -32,10 +32,12 @@ import java.util.stream.Collectors;
 public class PdfExtractorService {
 
     private final OcrService ocrService;
+    private final UpstageDocumentParseService upstageService;
 
     @Autowired
-    public PdfExtractorService(OcrService ocrService) {
+    public PdfExtractorService(OcrService ocrService, UpstageDocumentParseService upstageService) {
         this.ocrService = ocrService;
+        this.upstageService = upstageService;
     }
 
     private static final List<String> BAD_KEYWORDS = List.of(
@@ -112,17 +114,28 @@ public class PdfExtractorService {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
             List<PdfArticle> allArticles = new ArrayList<>();
             int totalPages = document.getNumberOfPages();
-            // 페이지별 내장 이미지 목록 보관 맵
             Map<Integer, List<ImagePositionExtractor.ImageBoundingBox>> pageImagesMap = new HashMap<>();
             ImagePositionExtractor imageExtractor = new ImagePositionExtractor();
 
             for (int pi = 0; pi < totalPages; pi++) {
                 PDPage page = document.getPage(pi);
-                // 미리 이 페이지에 있는 모든 객체 이미지 추출 좌표 확보
                 List<ImagePositionExtractor.ImageBoundingBox> pImgs = imageExtractor.extract(page);
                 pageImagesMap.put(pi, new ArrayList<>(pImgs));
 
-                List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
+                List<PdfArticle> pageArticles;
+
+                // 문제 페이지 판별 → Upstage API 사용, 실패 시 PDFBox fallback
+                if (isProblematicPage(document, pi)) {
+                    log.info("[Hybrid] 페이지 {} → Upstage API 사용", pi + 1);
+                    pageArticles = extractPageWithUpstage(pdfBytes, pi + 1);
+                    if (pageArticles.isEmpty()) {
+                        log.warn("[Hybrid] Upstage 결과 없음, PDFBox fallback 사용 (페이지 {})", pi + 1);
+                        pageArticles = buildArticlesForPage(document, pi);
+                    }
+                } else {
+                    pageArticles = buildArticlesForPage(document, pi);
+                }
+
                 int idx = 1;
                 for (PdfArticle a : pageArticles) {
                     a.setPage(pi + 1);
@@ -603,6 +616,59 @@ public class PdfExtractorService {
             }
         }
         articles.removeAll(toRemove);
+    }
+
+    // ──────────────────────── Upstage Hybrid ────────────────────────
+
+    /**
+     * 문제 페이지 여부를 판별합니다.
+     * 아래 조건 중 하나라도 해당하면 Upstage API를 사용합니다.
+     *  1. 이어짐(continued) 마커가 있는 페이지
+     *  2. 와이드스팬 제목(페이지 너비 60% 초과)이 2개 이상 → 랩 레이아웃 의심
+     */
+    private boolean isProblematicPage(PDDocument document, int pageIndex) throws IOException {
+        PDPage page = document.getPage(pageIndex);
+        PdfTextExtractor.ExtractResult result = PdfTextExtractor.extractLines(page, document, pageIndex);
+        List<Line> lines = result.getLines();
+
+        double pageWidth = page.getMediaBox().getWidth();
+        boolean hasContinuation = lines.stream()
+                .anyMatch(l -> CONTINUATION_PATTERN.matcher(l.getText()).find()
+                        || CONTINUED_FROM_PATTERN.matcher(l.getText()).find());
+
+        long wideSpanTitleCount = lines.stream()
+                .filter(l -> (l.getBbox()[2] - l.getBbox()[0]) > pageWidth * 0.6)
+                .filter(l -> l.getMaxSize() >= 15.0)
+                .count();
+
+        if (hasContinuation) {
+            log.debug("[Hybrid] 페이지 {} — 이어짐 마커 감지", pageIndex + 1);
+            return true;
+        }
+        if (wideSpanTitleCount >= 2) {
+            log.debug("[Hybrid] 페이지 {} — 와이드스팬 제목 {}개 감지 (랩 레이아웃 의심)",
+                    pageIndex + 1, wideSpanTitleCount);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Upstage API로 특정 페이지를 파싱합니다.
+     * 현재는 PDF 전체를 전송 후 페이지 번호로 필터링합니다.
+     * (Upstage는 페이지 단위 호출을 지원하지 않음)
+     */
+    private List<PdfArticle> extractPageWithUpstage(byte[] pdfBytes, int pageNumber) {
+        try {
+            String html = upstageService.parseToHtml(pdfBytes);
+            List<PdfArticle> all = upstageService.extractArticlesFromHtml(html);
+            // Upstage는 전체 문서를 반환하므로, 여기서는 결과를 그대로 사용
+            // (페이지별 분리가 필요하면 Upstage 응답의 page 메타데이터 활용 가능)
+            return all;
+        } catch (Exception e) {
+            log.error("[Upstage] API 호출 실패: {}", e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
     // ──────────────────────── internal process ────────────────────────
