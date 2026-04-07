@@ -112,38 +112,51 @@ public class PdfExtractorService {
 
     public ExtractionResult extractWithImages(byte[] pdfBytes, BiConsumer<Integer, Integer> progressCallback) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
-            List<PdfArticle> allArticles = new ArrayList<>();
             int totalPages = document.getNumberOfPages();
             Map<Integer, List<ImagePositionExtractor.ImageBoundingBox>> pageImagesMap = new HashMap<>();
             ImagePositionExtractor imageExtractor = new ImagePositionExtractor();
+
+            // 1. PDFBox로 전체 처리 + 문제 페이지 여부 동시 확인
+            List<PdfArticle> pdfboxArticles = new ArrayList<>();
+            boolean hasProblematicPage = false;
 
             for (int pi = 0; pi < totalPages; pi++) {
                 PDPage page = document.getPage(pi);
                 List<ImagePositionExtractor.ImageBoundingBox> pImgs = imageExtractor.extract(page);
                 pageImagesMap.put(pi, new ArrayList<>(pImgs));
 
-                List<PdfArticle> pageArticles;
-
-                // 문제 페이지 판별 → Upstage API 사용, 실패 시 PDFBox fallback
-                if (isProblematicPage(document, pi)) {
-                    log.info("[Hybrid] 페이지 {} → Upstage API 사용", pi + 1);
-                    pageArticles = extractPageWithUpstage(pdfBytes, pi + 1);
-                    if (pageArticles.isEmpty()) {
-                        log.warn("[Hybrid] Upstage 결과 없음, PDFBox fallback 사용 (페이지 {})", pi + 1);
-                        pageArticles = buildArticlesForPage(document, pi);
-                    }
-                } else {
-                    pageArticles = buildArticlesForPage(document, pi);
+                if (!hasProblematicPage && isProblematicPage(document, pi)) {
+                    log.info("[Hybrid] 페이지 {} — 문제 페이지 감지", pi + 1);
+                    hasProblematicPage = true;
                 }
 
+                List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
                 int idx = 1;
                 for (PdfArticle a : pageArticles) {
                     a.setPage(pi + 1);
                     a.setId(String.format("p%02d_a%03d", pi + 1, idx++));
-                    allArticles.add(a);
+                    pdfboxArticles.add(a);
                 }
                 if (progressCallback != null) {
                     progressCallback.accept(pi + 1, totalPages);
+                }
+            }
+
+            // 2. 문제 페이지 있으면 Upstage 1회 호출로 전체 교체
+            List<PdfArticle> allArticles = pdfboxArticles;
+            if (hasProblematicPage) {
+                log.info("[Hybrid] Upstage 전체 PDF 1회 처리 시작");
+                List<PdfArticle> upstageArticles = extractAllWithUpstage(pdfBytes);
+                if (!upstageArticles.isEmpty()) {
+                    log.info("[Hybrid] Upstage 결과 {}개 → 전체 교체", upstageArticles.size());
+                    for (int i = 0; i < upstageArticles.size(); i++) {
+                        PdfArticle a = upstageArticles.get(i);
+                        if (a.getPage() == 0) a.setPage(1);
+                        a.setId(String.format("up%03d", i + 1));
+                    }
+                    allArticles = upstageArticles;
+                } else {
+                    log.warn("[Hybrid] Upstage 결과 없음 → PDFBox 결과 유지");
                 }
             }
 
@@ -654,17 +667,12 @@ public class PdfExtractorService {
     }
 
     /**
-     * Upstage API로 특정 페이지를 파싱합니다.
-     * 현재는 PDF 전체를 전송 후 페이지 번호로 필터링합니다.
-     * (Upstage는 페이지 단위 호출을 지원하지 않음)
+     * Upstage API로 전체 PDF를 1회 파싱하여 전체 기사 목록을 반환합니다.
      */
-    private List<PdfArticle> extractPageWithUpstage(byte[] pdfBytes, int pageNumber) {
+    private List<PdfArticle> extractAllWithUpstage(byte[] pdfBytes) {
         try {
-            String html = upstageService.parseToHtml(pdfBytes);
-            List<PdfArticle> all = upstageService.extractArticlesFromHtml(html);
-            // Upstage는 전체 문서를 반환하므로, 여기서는 결과를 그대로 사용
-            // (페이지별 분리가 필요하면 Upstage 응답의 page 메타데이터 활용 가능)
-            return all;
+            List<java.util.Map<String, Object>> elements = upstageService.parseToElements(pdfBytes);
+            return upstageService.extractArticlesFromElements(elements);
         } catch (Exception e) {
             log.error("[Upstage] API 호출 실패: {}", e.getMessage());
             return Collections.emptyList();

@@ -17,6 +17,10 @@ public class PdfExtractorTest {
         // UpstageDocumentParseService는 @Value 주입이 필요하므로 테스트에선 mock으로 대체
         com.qroad.be.pdf.UpstageDocumentParseService upstage =
                 new com.qroad.be.pdf.UpstageDocumentParseService();
+        String upstageKey = System.getenv("UPSTAGE_API_KEY");
+        if (upstageKey != null && !upstageKey.isEmpty()) {
+            upstage.setApiKey(upstageKey);
+        }
         PdfExtractorService service = new PdfExtractorService(new OcrService(), upstage);
         Path pdfPath = Paths.get("/Users/kim-yusin/Downloads/1825.pdf");
         if (!Files.exists(pdfPath)) {

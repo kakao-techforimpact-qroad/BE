@@ -14,37 +14,41 @@ import java.util.regex.*;
 
 /**
  * Upstage Document Parse API 호출 서비스.
- * 파이썬의 requests.post()를 Java RestTemplate으로 동일하게 구현.
  *
- * POST https://api.upstage.ai/v1/document-digitizer
+ * POST https://api.upstage.ai/v1/document-digitization
  * Authorization: Bearer {API_KEY}
  * Body: multipart/form-data
  *   - document: PDF 바이트
- *   - output_formats: ["html"]
+ *   - model: document-parse-260128
+ *   - output_formats: ["html","text","markdown"]
+ *
+ * 응답의 elements 배열을 사용해 기사를 추출합니다.
+ * elements[i] = { category, content.html, page, coordinates }
  */
 @Slf4j
 @Service
 public class UpstageDocumentParseService {
 
-    private static final String ENDPOINT = "https://api.upstage.ai/v1/document-digitizer";
+    private static final String ENDPOINT = "https://api.upstage.ai/v1/document-digitization";
 
-    @Value("${upstage.api.key}")
+    @Value("${upstage.api.key:}")
     private String apiKey;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
     /**
-     * PDF 바이트를 Upstage API에 전송하고 HTML 결과를 받아옵니다.
-     *
-     * @param pdfBytes PDF 파일 바이트
-     * @return Upstage가 파싱한 HTML 문자열
+     * PDF 바이트를 Upstage API에 전송하고 elements 배열을 반환합니다.
      */
-    public String parseToHtml(byte[] pdfBytes) {
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> parseToElements(byte[] pdfBytes) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         headers.setBearerAuth(apiKey);
 
-        // 파이썬의 files={"document": open("file.pdf", "rb")} 에 해당
         ByteArrayResource pdfResource = new ByteArrayResource(pdfBytes) {
             @Override
             public String getFilename() { return "document.pdf"; }
@@ -52,7 +56,10 @@ public class UpstageDocumentParseService {
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("document", pdfResource);
-        body.add("output_formats", "[\"html\"]");
+        body.add("model", "document-parse-260128");
+        body.add("ocr", "auto");
+        body.add("output_formats", "[\"html\",\"text\",\"markdown\"]");
+        body.add("coordinates", "true");
 
         HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
 
@@ -63,77 +70,129 @@ public class UpstageDocumentParseService {
             throw new RuntimeException("Upstage API 응답 오류: " + response.getStatusCode());
         }
 
-        // 응답 구조: {"content": {"html": "..."}, ...}
-        Map<?, ?> content = (Map<?, ?>) response.getBody().get("content");
-        if (content == null || content.get("html") == null) {
-            throw new RuntimeException("Upstage API 응답에 html 필드 없음");
+        List<Map<String, Object>> elements = (List<Map<String, Object>>) response.getBody().get("elements");
+        if (elements == null) {
+            throw new RuntimeException("Upstage API 응답에 elements 필드 없음");
         }
 
-        String html = content.get("html").toString();
-        log.info("[Upstage] 파싱 완료 (html {}자)", html.length());
-        return html;
+        log.info("[Upstage] 파싱 완료 (elements {}개)", elements.size());
+        return elements;
     }
 
     /**
-     * Upstage HTML 결과에서 기사 목록을 추출합니다.
-     * <h1>/<h2> 태그 = 제목, 이후 <p> 태그들 = 본문으로 취급.
+     * Upstage elements 배열에서 기사 목록을 추출합니다.
      *
-     * @param html Upstage가 반환한 HTML
-     * @return 기사 목록 (제목 + 본문)
+     * 전략:
+     * - category='heading1' 이고 폰트 크기 >= threshold → 기사 제목
+     * - category='paragraph' 이고 폰트 크기 >= 18px 이고 텍스트 길이 <= 80자 → 제목으로 처리
+     * - 나머지 → 본문
+     * - 빈 본문 상태에서 다음 제목이 같은 페이지 AND 더 작은 폰트이면 소제목으로 합침
      */
-    public List<PdfArticle> extractArticlesFromHtml(String html) {
+    public List<PdfArticle> extractArticlesFromElements(List<Map<String, Object>> elements) {
         List<PdfArticle> articles = new ArrayList<>();
 
-        // <h1> 또는 <h2> 태그를 제목으로 감지
-        Pattern titlePattern = Pattern.compile(
-                "<h[12][^>]*>(.*?)</h[12]>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-        // <p> 태그를 본문으로 감지
-        Pattern paraPattern = Pattern.compile(
-                "<p[^>]*>(.*?)</p>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-        // HTML 태그 제거용
+        Pattern fontSizePattern = Pattern.compile("font-size:(\\d+)px");
         Pattern tagPattern = Pattern.compile("<[^>]+>");
 
-        Matcher titleMatcher = titlePattern.matcher(html);
-        List<int[]> titleRanges = new ArrayList<>();
-        List<String> titleTexts = new ArrayList<>();
-
-        while (titleMatcher.find()) {
-            titleRanges.add(new int[]{titleMatcher.start(), titleMatcher.end()});
-            titleTexts.add(tagPattern.matcher(titleMatcher.group(1)).replaceAll("").trim());
+        // 1차 스캔: heading1 최대 폰트 크기 파악
+        int maxFontSize = 14;
+        for (Map<String, Object> el : elements) {
+            if (!"heading1".equals(el.get("category"))) continue;
+            String html = getElementHtml(el);
+            Matcher fm = fontSizePattern.matcher(html);
+            if (fm.find()) maxFontSize = Math.max(maxFontSize, Integer.parseInt(fm.group(1)));
         }
+        // heading1 기준 제목 임계값: 최대 폰트의 75% 이상
+        final int h1Threshold = Math.max(16, (int)(maxFontSize * 0.75));
+        log.debug("[Upstage] heading1 최대 폰트 {}px, 제목 기준 {}px 이상", maxFontSize, h1Threshold);
 
-        if (titleRanges.isEmpty()) {
-            log.warn("[Upstage] HTML에서 제목(h1/h2) 태그를 찾지 못했습니다.");
-            return articles;
-        }
+        // 2차 스캔: elements 순서대로 기사 조립
+        String currentTitle = null;
+        int currentTitleFontSize = 0;
+        int currentTitlePage = 0;
+        StringBuilder currentBody = new StringBuilder();
 
-        // 각 제목 구간의 본문 수집
-        for (int i = 0; i < titleRanges.size(); i++) {
-            int bodyStart = titleRanges.get(i)[1];
-            int bodyEnd = (i + 1 < titleRanges.size()) ? titleRanges.get(i + 1)[0] : html.length();
-            String section = html.substring(bodyStart, bodyEnd);
+        for (Map<String, Object> el : elements) {
+            String category = (String) el.get("category");
+            int page = el.get("page") instanceof Number ? ((Number) el.get("page")).intValue() : 1;
+            String html = getElementHtml(el);
+            String text = tagPattern.matcher(
+                    html.replaceAll("(?i)<br\\s*/?>", " ")).replaceAll("").trim();
 
-            StringBuilder bodyBuilder = new StringBuilder();
-            Matcher paraMatcher = paraPattern.matcher(section);
-            while (paraMatcher.find()) {
-                String paraText = tagPattern.matcher(paraMatcher.group(1)).replaceAll("").trim();
-                if (!paraText.isEmpty()) {
-                    bodyBuilder.append(paraText).append("\n");
-                }
+            if (text.isEmpty()) continue;
+
+            // header/footer/figure → 무시
+            if ("header".equals(category) || "footer".equals(category) || "figure".equals(category)) {
+                continue;
             }
 
-            String body = bodyBuilder.toString().trim();
-            String title = titleTexts.get(i);
+            int fontSize = 14;
+            Matcher fm = fontSizePattern.matcher(html);
+            if (fm.find()) fontSize = Integer.parseInt(fm.group(1));
 
-            if (title.length() < 3 || body.length() < 120) continue;
+            boolean isTitle = false;
 
-            PdfArticle article = new PdfArticle();
-            article.setTitle(title);
-            article.setText(body);
-            articles.add(article);
+            if ("heading1".equals(category) && fontSize >= h1Threshold) {
+                isTitle = true;
+            } else if ("paragraph".equals(category) && fontSize >= 20 && text.length() <= 80) {
+                // 짧고 큰 폰트(20px 이상)의 paragraph → 제목으로 처리
+                // 18px paragraph는 소제목/불릿으로 본문 처리
+                isTitle = true;
+            }
+
+            if (isTitle) {
+                boolean samePageEmptyBody = (currentTitle != null)
+                        && currentBody.length() == 0
+                        && page == currentTitlePage
+                        && fontSize < currentTitleFontSize;
+
+                if (samePageEmptyBody) {
+                    // 직전 제목과 같은 페이지, 본문 없음, 더 작은 폰트 → 소제목
+                    currentBody.append(text).append("\n");
+                } else {
+                    // 새 기사 시작
+                    if (currentTitle != null) {
+                        saveArticle(articles, currentTitle, currentBody, currentTitlePage);
+                    }
+                    currentTitle = text;
+                    currentTitleFontSize = fontSize;
+                    currentTitlePage = page;
+                    currentBody = new StringBuilder();
+                }
+            } else {
+                // 본문 추가
+                if (currentTitle != null) {
+                    currentBody.append(text).append("\n");
+                }
+            }
+        }
+        // 마지막 기사 저장
+        if (currentTitle != null) {
+            saveArticle(articles, currentTitle, currentBody, currentTitlePage);
         }
 
         log.info("[Upstage] 기사 {}개 추출 완료", articles.size());
         return articles;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getElementHtml(Map<String, Object> el) {
+        Object content = el.get("content");
+        if (content instanceof Map) {
+            Object html = ((Map<?, ?>) content).get("html");
+            if (html != null) return html.toString();
+        }
+        return "";
+    }
+
+    private void saveArticle(List<PdfArticle> articles, String title, StringBuilder body, int page) {
+        if (title == null || title.length() < 3) return;
+        String bodyText = body.toString().trim();
+        if (bodyText.length() < 120) return;
+        PdfArticle article = new PdfArticle();
+        article.setTitle(title);
+        article.setText(bodyText);
+        article.setPage(page);
+        articles.add(article);
     }
 }
