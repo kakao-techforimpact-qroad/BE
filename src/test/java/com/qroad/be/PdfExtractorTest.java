@@ -15,7 +15,7 @@ public class PdfExtractorTest {
     public void testExtraction() throws Exception {
         System.out.println("Starting PDF extraction test...");
         PdfExtractorService service = new PdfExtractorService(new OcrService());
-        Path pdfPath = Paths.get("/Users/munjin-yeong/개발/qroad/1825.pdf");
+        Path pdfPath = Paths.get("/Users/kim-yusin/Downloads/1825.pdf");
         if (!Files.exists(pdfPath)) {
             System.err.println("File not found: " + pdfPath);
             return;
@@ -27,7 +27,7 @@ public class PdfExtractorTest {
         
         // Create output directory with timestamp
         String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-        Path outputDir = Paths.get("/Users/munjin-yeong/개발/qroad/테스트/test_" + timestamp);
+        Path outputDir = Paths.get("/Users/kim-yusin/Downloads/test_" + timestamp);
         Files.createDirectories(outputDir);
         System.out.println("Saving results to directory: " + outputDir);
         
