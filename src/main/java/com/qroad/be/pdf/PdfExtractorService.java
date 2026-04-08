@@ -270,6 +270,126 @@ public class PdfExtractorService {
         return splits.size();
     }
 
+    private double centerX(Line line) {
+        double[] b = line.getBbox();
+        return (b[0] + b[2]) / 2.0;
+    }
+
+    private List<Line> mergeWrappedTitleLines(List<Line> sortedTitles, double bodyMedian, double pageWidth) {
+        if (sortedTitles == null || sortedTitles.size() <= 1) {
+            return sortedTitles == null ? Collections.emptyList() : new ArrayList<>(sortedTitles);
+        }
+
+        List<Line> merged = new ArrayList<>();
+        boolean[] consumed = new boolean[sortedTitles.size()];
+
+        for (int i = 0; i < sortedTitles.size(); i++) {
+            if (consumed[i]) {
+                continue;
+            }
+            Line current = sortedTitles.get(i);
+            consumed[i] = true;
+
+            while (true) {
+                int bestIdx = -1;
+                double bestGap = Double.MAX_VALUE;
+
+                for (int j = i + 1; j < sortedTitles.size(); j++) {
+                    if (consumed[j]) {
+                        continue;
+                    }
+                    Line cand = sortedTitles.get(j);
+                    double gap = cand.getY0() - current.getY1();
+
+                    // y 정렬 상태에서 너무 멀면 중단
+                    if (gap > Math.max(36.0, bodyMedian * 2.4)) {
+                        break;
+                    }
+                    if (!shouldMergeTitleLines(current, cand, bodyMedian, pageWidth)) {
+                        continue;
+                    }
+                    if (gap < bestGap) {
+                        bestGap = gap;
+                        bestIdx = j;
+                    }
+                }
+
+                if (bestIdx < 0) {
+                    break;
+                }
+
+                current = mergeTitleLines(current, sortedTitles.get(bestIdx));
+                consumed[bestIdx] = true;
+            }
+
+            merged.add(current);
+        }
+
+        merged.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return merged;
+    }
+
+    private boolean shouldMergeTitleLines(Line upper, Line lower, double bodyMedian, double pageWidth) {
+        double gap = lower.getY0() - upper.getY1();
+        if (gap < -14) {
+            return false;
+        }
+        if (gap > Math.max(18.0, bodyMedian * 1.3)) {
+            return false;
+        }
+
+        // 본문급 폰트(부제목 등) 오병합 방지
+        if (Math.min(upper.getMaxSize(), lower.getMaxSize()) < Math.max(bodyMedian * 1.35, 13.5)) {
+            return false;
+        }
+
+        double cxDiff = Math.abs(centerX(upper) - centerX(lower));
+        if (cxDiff > pageWidth * 0.18) {
+            return false;
+        }
+
+        double[] ub = upper.getBbox();
+        double[] lb = lower.getBbox();
+        double overlap = Math.max(0, Math.min(ub[2], lb[2]) - Math.max(ub[0], lb[0]));
+        double minWidth = Math.min(upper.getWidth(), lower.getWidth());
+        if (minWidth <= 0) {
+            return false;
+        }
+
+        // 두 번째 줄이 짧은 인용구 제목일 수 있어 기본 임계값을 완화
+        if (overlap / minWidth < 0.30) {
+            return false;
+        }
+
+        double maxFont = Math.max(upper.getMaxSize(), lower.getMaxSize());
+        double minFont = Math.min(upper.getMaxSize(), lower.getMaxSize());
+        return maxFont > 0 && (maxFont - minFont) / maxFont <= 0.30;
+    }
+
+    private Line mergeTitleLines(Line upper, Line lower) {
+        String text = (upper.getText() + " " + lower.getText()).replaceAll("\\s+", " ").trim();
+        double[] ub = upper.getBbox();
+        double[] lb = lower.getBbox();
+        double[] bbox = new double[] {
+                Math.min(ub[0], lb[0]),
+                Math.min(ub[1], lb[1]),
+                Math.max(ub[2], lb[2]),
+                Math.max(ub[3], lb[3])
+        };
+        return new Line(text, bbox, Math.max(upper.getMaxSize(), lower.getMaxSize()));
+    }
+
+    private double nextTitleTopByAlignedX(List<Line> tlist, int currentIndex, double pageWidth, double defaultY) {
+        double curCx = centerX(tlist.get(currentIndex));
+        for (int j = currentIndex + 1; j < tlist.size(); j++) {
+            Line n = tlist.get(j);
+            if (Math.abs(centerX(n) - curCx) <= pageWidth * 0.22) {
+                return n.getBbox()[1] - 2;
+            }
+        }
+        return defaultY;
+    }
+
     // ──────────────────────── bbox helpers ────────────────────────
 
     private double[] clampBbox(double[] b, PDRectangle rect) {
@@ -305,7 +425,7 @@ public class PdfExtractorService {
 
         Map<Integer, List<Line>> cols = new TreeMap<>();
         for (Line l : lines) {
-            int c = assignCol(l.getX0(), splits);
+            int c = assignCol(centerX(l), splits);
             cols.computeIfAbsent(c, k -> new ArrayList<>()).add(l);
         }
 
@@ -360,6 +480,10 @@ public class PdfExtractorService {
             return Collections.emptyList();
         }
 
+        // 두 줄 제목(예: 메인제목 + 짧은 인용구)을 먼저 병합
+        titles.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        titles = mergeWrappedTitleLines(titles, bodyMedian, W);
+
         // Infer page-level column splits
         List<Double> xsTitle = titles.stream().map(Line::getX0).collect(Collectors.toList());
         List<Double> xsAll = lines.stream().map(Line::getX0).collect(Collectors.toList());
@@ -369,7 +493,7 @@ public class PdfExtractorService {
         // Group titles by column
         Map<Integer, List<Line>> titlesByCol = new TreeMap<>();
         for (Line t : titles) {
-            int c = assignCol(t.getX0(), splits);
+            int c = assignCol(centerX(t), splits);
             titlesByCol.computeIfAbsent(c, k -> new ArrayList<>()).add(t);
         }
         for (List<Line> colTitles : titlesByCol.values()) {
@@ -394,7 +518,7 @@ public class PdfExtractorService {
 
                 // y-range: from title bottom to next title top or page end
                 double y0 = t.getBbox()[3]; // title bottom
-                double y1 = (i + 1 < tlist.size()) ? tlist.get(i + 1).getBbox()[1] - 2 : H;
+                double y1 = nextTitleTopByAlignedX(tlist, i, W, H);
 
                 if (y1 <= y0 + 22)
                     continue;

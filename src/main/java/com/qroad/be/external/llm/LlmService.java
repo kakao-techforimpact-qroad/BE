@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -23,6 +25,9 @@ public class LlmService {
 
     private final OpenAiService openAiService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Pattern ARTICLE_BLOCK_PATTERN = Pattern.compile(
+            "(?ms)(^={20,}\\n\\[기사\\s*\\d+[^\\n]*\\n={20,}\\n.*?)(?=\\n={20,}\\n\\[기사\\s*\\d+|\\z)");
+    private static final Pattern TITLE_LINE_PATTERN = Pattern.compile("(?m)^제목:\\s*(.+)$");
 
     /**
      * 신문 지면 전체 내용을 기사 단위로 청킹하고, 각 기사의 메타데이터와 요약문, 키워드를 추출합니다.
@@ -49,7 +54,7 @@ public class LlmService {
             log.info("신문 지면 청킹 및 분석 시작");
 
             // 1단계: 규칙 기반으로 신문 지면을 기사 단위로 청킹
-            List<String> rawArticleContents = chunkByReporterPattern(paperContent);
+            List<String> rawArticleContents = chunkArticles(paperContent);
 
             log.info("총 {}개의 기사 청킹 완료", rawArticleContents.size());
 
@@ -57,12 +62,17 @@ public class LlmService {
             List<ArticleChunkDTO> articles = new ArrayList<>();
             int total = rawArticleContents.size();
             for (int i = 0; i < total; i++) {
-                String articleContent = rawArticleContents.get(i);
+                String articleChunk = rawArticleContents.get(i);
+                String extractedTitle = extractTitleFromChunk(articleChunk);
+                String articleContent = stripChunkHeader(articleChunk);
                 // LLM으로 메타데이터 및 분석 정보 추출
                 ArticleAnalysisResult analysis = analyzeArticleWithMetadata(articleContent);
+                String finalTitle = (extractedTitle != null && !extractedTitle.isBlank())
+                        ? extractedTitle
+                        : analysis.getTitle();
 
                 ArticleChunkDTO article = ArticleChunkDTO.builder()
-                        .title(analysis.getTitle())
+                        .title(finalTitle)
                         .content(articleContent)
                         .reporter(analysis.getReporter())
                         .summary(analysis.getSummary())
@@ -71,6 +81,13 @@ public class LlmService {
                         .build();
 
                 articles.add(article);
+                log.info("기사 메타 확정: index={}/{}, title={}, reporter={}, category={}, titleSource={}",
+                        i + 1,
+                        total,
+                        finalTitle,
+                        analysis.getReporter(),
+                        analysis.getCategory(),
+                        (extractedTitle != null && !extractedTitle.isBlank()) ? "pdf-title-line" : "llm");
                 if (progressCallback != null) {
                     progressCallback.accept(i + 1, total);
                 }
@@ -92,6 +109,30 @@ public class LlmService {
      * @param paperContent 신문 지면 원문
      * @return 청킹된 기사 원문 리스트
      */
+    private List<String> chunkArticles(String paperContent) {
+        List<String> byMarker = chunkByArticleMarker(paperContent);
+        if (!byMarker.isEmpty()) {
+            return byMarker;
+        }
+        return chunkByReporterPattern(paperContent);
+    }
+
+    private List<String> chunkByArticleMarker(String paperContent) {
+        List<String> articles = new ArrayList<>();
+        String normalized = paperContent == null ? "" : paperContent.replace("\r\n", "\n");
+        Matcher matcher = ARTICLE_BLOCK_PATTERN.matcher(normalized);
+        while (matcher.find()) {
+            String block = matcher.group(1).trim();
+            if (!block.isEmpty()) {
+                articles.add(block);
+            }
+        }
+        if (!articles.isEmpty()) {
+            log.info("기사 블록 마커 기반 청킹 사용: {}개", articles.size());
+        }
+        return articles;
+    }
+
     private List<String> chunkByReporterPattern(String paperContent) {
         List<String> articles = new ArrayList<>();
 
@@ -153,6 +194,42 @@ public class LlmService {
         return articles;
     }
 
+    private String extractTitleFromChunk(String chunk) {
+        if (chunk == null || chunk.isBlank()) {
+            return "";
+        }
+        Matcher m = TITLE_LINE_PATTERN.matcher(chunk);
+        if (m.find()) {
+            return m.group(1).trim();
+        }
+        return "";
+    }
+
+    private String stripChunkHeader(String chunk) {
+        if (chunk == null || chunk.isBlank()) {
+            return "";
+        }
+        String normalized = chunk.replace("\r\n", "\n");
+        String[] lines = normalized.split("\n");
+        StringBuilder sb = new StringBuilder();
+        boolean titleSkipped = false;
+        for (String line : lines) {
+            String trim = line.trim();
+            if (trim.matches("^={20,}$")) {
+                continue;
+            }
+            if (trim.matches("^\\[기사\\s*\\d+.*\\]$")) {
+                continue;
+            }
+            if (!titleSkipped && trim.startsWith("제목:")) {
+                titleSkipped = true;
+                continue;
+            }
+            sb.append(line).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
     /**
      * 개별 기사의 제목, 기자명, 요약문, 키워드를 추출합니다.
      */
@@ -161,7 +238,7 @@ public class LlmService {
             String analysisPrompt = buildMetadataAnalysisPrompt(content);
             String analysisResponse = callGpt4oMini(analysisPrompt);
 
-            log.info("기사 분석 결과: {}", analysisResponse);
+            log.debug("기사 분석 원본(JSON): {}", analysisResponse);
 
             // JSON 파싱
             Map<String, Object> result = objectMapper.readValue(analysisResponse, new TypeReference<>() {
@@ -211,12 +288,13 @@ public class LlmService {
      * GPT-4o-mini 모델을 호출합니다.
      */
     private String callGpt4oMini(String prompt) {
+        String safePrompt = sanitizeForOpenAiJson(prompt);
         ChatCompletionRequest request = ChatCompletionRequest.builder()
                 .model("gpt-4o-mini")
                 .messages(List.of(
                         new ChatMessage(ChatMessageRole.SYSTEM.value(),
                                 "당신은 신문 기사를 분석하는 전문가입니다. 항상 JSON 형식으로 응답해주세요."),
-                        new ChatMessage(ChatMessageRole.USER.value(), prompt)))
+                        new ChatMessage(ChatMessageRole.USER.value(), safePrompt)))
                 .temperature(0.3)
                 .maxTokens(4000)
                 .build();
@@ -233,6 +311,7 @@ public class LlmService {
      * 기사 메타데이터 및 분석을 위한 프롬프트 생성
      */
     private String buildMetadataAnalysisPrompt(String content) {
+        String safeContent = sanitizeForOpenAiJson(content);
         return String.format("""
                 다음은 신문 기사의 원문입니다. 이 기사를 분석해주세요.
 
@@ -254,7 +333,17 @@ public class LlmService {
                   "keywords": ["키워드1", "키워드2", "키워드3"],
                   "category": "분류된 카테고리"
                 }
-                """, content);
+                """, safeContent);
+    }
+
+    private String sanitizeForOpenAiJson(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+                .replace("\uFEFF", "")
+                .replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "")
+                .trim();
     }
 
     /**
