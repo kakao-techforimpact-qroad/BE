@@ -395,6 +395,12 @@ public class LlmService {
             return m.group(1);
         }
 
+        // 일반 기사에서도 말미에 "홍길동 기자" 형태가 있으면 기자명으로 보완
+        String tailNameReporter = extractTailNameOnlyReporter(body);
+        if (StringUtils.hasText(tailNameReporter)) {
+            return tailNameReporter;
+        }
+
         // 1면 이어짐 기사 예외: 이메일이 누락돼도 "홍길동 기자" 형태면 기자명 허용
         if (isFrontPageContinuation(source, body)) {
             String nameOnlyReporter = extractNameOnlyReporter(body);
@@ -432,6 +438,19 @@ public class LlmService {
             last = matcher.group(1);
         }
         return last;
+    }
+
+    private String extractTailNameOnlyReporter(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String[] lines = body.split("\\R");
+        int from = Math.max(0, lines.length - 20);
+        StringBuilder tail = new StringBuilder();
+        for (int i = from; i < lines.length; i++) {
+            tail.append(lines[i]).append('\n');
+        }
+        return extractNameOnlyReporter(tail.toString());
     }
 
     private String normalizeCategoryValue(String category) {
