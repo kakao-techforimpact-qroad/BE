@@ -3,7 +3,7 @@ package com.qroad.be.service;
 import com.qroad.be.domain.PaperEntity;
 import com.qroad.be.domain.ArticleKeywordEntity;
 import com.qroad.be.domain.ArticleEntity;
-// import com.qroad.be.domain.QrCodeEntity; // QR 肄붾뱶 湲곕뒫 鍮꾪솢?깊솕
+// import com.qroad.be.domain.QrCodeEntity; // QR 코드 기능 비활성화
 import com.qroad.be.domain.AdminEntity;
 import com.qroad.be.dto.*;
 import com.qroad.be.pdf.PdfExtractorService;
@@ -11,7 +11,7 @@ import com.qroad.be.progress.PublicationProgressStore;
 import com.qroad.be.progress.PublicationStep;
 import com.qroad.be.repository.ArticleRepository;
 import com.qroad.be.repository.PaperRepository;
-// import com.qroad.be.repository.QrCodeRepository; // QR 肄붾뱶 湲곕뒫 鍮꾪솢?깊솕
+// import com.qroad.be.repository.QrCodeRepository; // QR 코드 기능 비활성화
 import com.qroad.be.repository.ArticleKeywordRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,9 +47,13 @@ public class PaperService {
                         Pattern.compile("(?i)^\\s*\\uc54c\\ub9bd\\ub2c8\ub2e4\\s*$"),
                         Pattern.compile("(?i)^\\s*\\uc8fc\\ubbfc\\s*\\uac8c\\uc2dc\\ud310\\s*$"));
 
+        private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
+                "광고", "홍보", "공고", "채용", "모집", "입찰"
+        );
+
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
-        // private final QrCodeRepository qrCodeRepository; // QR 肄붾뱶 湲곕뒫 鍮꾪솢?깊솕
+        // private final QrCodeRepository qrCodeRepository; // QR 코드 기능 비활성화
         private final ArticleKeywordRepository articleKeywordRepository;
         private final com.qroad.be.repository.KeywordRepository keywordRepository;
         private final com.qroad.be.repository.ArticleRelatedRepository articleRelatedRepository;
@@ -62,7 +66,7 @@ public class PaperService {
         private final PdfExtractorService pdfExtractorService;
 
         /**
-         * API 1: 諛쒗뻾???좊Ц 由ъ뒪??議고쉶
+         * API 1: 발행된 신문 리스트 조회
          */
         public PublicationListResponse getPublications(int page, int limit, Long adminId, YearMonth month, String q) {
                 Pageable pageable = PageRequest.of(page - 1, limit, Sort.by(Sort.Direction.DESC, "publishedDate"));
@@ -104,7 +108,7 @@ public class PaperService {
 
                         if (finalQLikePattern != null) {
                                 List<Predicate> qPredicates = new ArrayList<>();
-                                // "?몄닔 臾몄옄??YYYY-MM)" 遺遺?寃?? q=2026 -> 2026-02 留ㅼ묶
+                                // "호수 문자열(YYYY-MM)" 부분 검색: q=2026 -> 2026-02 매칭
                                 qPredicates.add(cb.like(
                                                 cb.function("to_char", String.class, root.get("publishedDate"),
                                                                 cb.literal("YYYY-MM")),
@@ -146,11 +150,11 @@ public class PaperService {
         }
 
         /**
-         * API 2: 諛쒗뻾 ?곸꽭 議고쉶
+         * API 2: 발행 상세 조회
          */
         public PublicationDetailResponse getPublicationDetail(Long paperId) {
                 PaperEntity paper = paperRepository.findById(paperId)
-                                .orElseThrow(() -> new RuntimeException("?좊Ц??李얠쓣 ???놁뒿?덈떎."));
+                                .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
 
                 List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
                 Map<Long, List<String>> keywordsByArticleId = getKeywordsForArticles(articles);
@@ -200,7 +204,7 @@ public class PaperService {
         }
 
         /**
-         * API 3: QR 諛쒗뻾 (鍮꾪솢?깊솕 - DB??qr_codes ?뚯씠釉??놁쓬)
+         * API 3: QR 발행 (비활성화 - DB에 qr_codes 테이블 없음)
          */
         /*
          * @Transactional
@@ -209,8 +213,8 @@ public class PaperService {
          * .orElseThrow(() -> new RuntimeException("Paper not found"));
          * 
          * String qrKey = generateUniqueQrKey();
-         * String targetUrl = "https://qroad.com/qr/" + qrKey; // ?ㅼ젣 ?꾨찓?몄쑝濡?蹂寃??꾩슂
-         * String qrImageUrl = "https://qroad.com/qr/image/" + qrKey; // ?덉떆 ?대?吏 URL
+         * String targetUrl = "https://qroad.com/qr/" + qrKey; // 실제 도메인으로 변경 필요
+         * String qrImageUrl = "https://qroad.com/qr/image/" + qrKey; // 예시 이미지 URL
          * 
          * QrCodeEntity qrCode = QrCodeEntity.builder()
          * .paper(paper)
@@ -235,15 +239,15 @@ public class PaperService {
          */
 
         /**
-         * ?좊Ц 吏硫??앹꽦 諛?湲곗궗 泥?궧/遺꾩꽍
-         * 1. Paper ???
-         * 2. GPT濡?湲곗궗 泥?궧 諛??붿빟/?ㅼ썙??異붿텧
-         * 3. Article ???
-         * 4. Keyword ???(以묐났 泥댄겕)
-         * 5. ArticleKeyword 留ㅽ븨
-         * 6. ?꾨쿋???앹꽦 諛?vector_articles ???
-         * 7. ?곌? 湲곗궗 ?앹꽦 (updateRelatedArticles ?몄텧)
-         * 8. ?앹꽦??湲곗궗 ?뺣낫 諛섑솚
+         * 신문 지면 생성 및 기사 청킹/분석
+         * 1. Paper 저장
+         * 2. GPT로 기사 청킹 및 요약/키워드 추출
+         * 3. Article 저장
+         * 4. Keyword 저장 (중복 체크)
+         * 5. ArticleKeyword 매핑
+         * 6. 임베딩 생성 및 vector_articles 저장
+         * 7. 연관 기사 생성 (updateRelatedArticles 호출)
+         * 8. 생성된 기사 정보 반환
          */
         @Transactional
         public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
@@ -252,16 +256,16 @@ public class PaperService {
         }
 
         /**
-         * jobId媛 ?꾨떖?섎㈃ ?④퀎蹂?吏꾪뻾瑜좎쓣 ?④퍡 湲곕줉?쒕떎.
-         * 湲곗〈 ?숆린 ?몄텧 ?명솚???꾪빐 jobId??nullable濡??좎??쒕떎.
+         * jobId가 전달되면 단계별 진행률을 함께 기록한다.
+         * 기존 동기 호출 호환을 위해 jobId는 nullable로 유지한다.
          */
         @Transactional
         public com.qroad.be.dto.PaperCreateResponseDTO createPaperWithArticles(
                         com.qroad.be.dto.PaperCreateRequestDTO request, Long adminId, String jobId) {
-                log.info("?좊Ц 吏硫??앹꽦 ?쒖옉: title={}, publishedDate={}, adminId={}",
+                log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
                                 request.getTitle(), request.getPublishedDate(), adminId);
 
-                // PDF瑜???踰덈쭔 ?쎌뼱???띿뒪?몄? ?대?吏瑜??숈떆??異붿텧
+                // PDF를 한 번만 읽어서 텍스트와 이미지를 동시에 추출
                 ExtractionResult extraction = runInStep(jobId, PublicationStep.PDF_READING, () -> {
                         try {
                                 byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
@@ -273,12 +277,12 @@ public class PaperService {
                                                                                 total);
                                                         }
                                                 });
-                                log.info("PDF 異붿텧 ?꾨즺: tempKey={}, textLength={}, imageCount={}",
+                                log.info("PDF 추출 완료: tempKey={}, textLength={}, imageCount={}",
                                                 request.getTempKey(), result.getText().length(),
                                                 result.getArticleImages().size());
                                 return result;
                         } catch (Exception e) {
-                                throw new RuntimeException("PDF 異붿텧 ?ㅽ뙣: " + request.getTempKey(), e);
+                                throw new RuntimeException("PDF 추출 실패: " + request.getTempKey(), e);
                         }
                 });
                 String content = extraction.getText();
@@ -292,18 +296,18 @@ public class PaperService {
                 PaperEntity paper = PaperEntity.builder()
                                 .title(request.getTitle())
                                 .content(content)
-                                .filePath(request.getTempKey()) // ?꾩떆媛? finalize ????뼱?
+                                .filePath(request.getTempKey()) // 임시값; finalize 후 덮어씀
                                 .publishedDate(request.getPublishedDate())
                                 .status("ACTIVE")
                                 .admin(admin)
                                 .build();
 
                 PaperEntity savedPaper = paperRepository.save(paper);
-                log.info("Paper ????꾨즺: id={}, adminId={}", savedPaper.getId(), adminId);
+                log.info("Paper 저장 완료: id={}, adminId={}", savedPaper.getId(), adminId);
 
-                // 湲곗궗蹂??대?吏瑜?S3???낅줈?쒗븯怨??쒕ぉ?뭆3 key 留듭쓣 ?앹꽦 (二쇱꽍 泥섎━??
-                // AI ?대?吏瑜?移댄뀒怨좊━蹂꾨줈 留ㅽ븨?섍쾶 ?섎㈃?????댁긽 PDF ?대?吏瑜?異붿텧/?낅줈?쒗븯吏 ?딆뒿?덈떎.
-                // 湲곗〈 PDF ???대?吏 異붿텧??S3???낅줈?쒗븯??濡쒖쭅 ?쒓굅??
+                // 기사별 이미지를 S3에 업로드하고 제목->S3 key 맵을 생성 (현재는 사용하지 않음)
+                // AI 이미지를 카테고리별로 매핑하게 되면서 더 이상 PDF 이미지를 추출/업로드하지 않습니다.
+                // 기존 PDF 내 이미지 추출을 S3에 업로드하는 로직 제거됨
 
                 List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
                                 jobId,
@@ -321,7 +325,7 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
                 });
-                log.info("珥?{}媛쒖쓽 湲곗궗 泥?궧 ?꾨즺", articleChunks.size());
+                log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 final AdminEntity finalAdmin = admin;
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
@@ -334,7 +338,16 @@ public class PaperService {
                                         log.info("Skip non-article notice by title: {}", chunk.getTitle());
                                         continue;
                                 }
-                                // 移댄뀒怨좊━ 湲곗궗 AI ?대?吏瑜?留ㅽ븨
+                                // 광고·홍보·공고 카테고리 기사 저장 제외
+                                boolean isAdCategory = AD_CATEGORY_KEYWORDS.stream()
+                                                .anyMatch(kw -> chunk.getCategory().contains(kw));
+                                if (isAdCategory) {
+                                        log.info("광고/홍보/공고 카테고리 저장 제외: title={}, category={}",
+                                                chunk.getTitle(), chunk.getCategory());
+                                        continue;
+                                }
+
+                                // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
 
                                 ArticleEntity article = ArticleEntity.builder()
@@ -342,7 +355,7 @@ public class PaperService {
                                                 .content(chunk.getContent())
                                                 .summary(chunk.getSummary())
                                                 .reporter(chunk.getReporter())
-                                                .link("") // 湲곕낯媛?
+                                                .link("") // 기본값
                                                 .status("ACTIVE")
                                                 .paper(savedPaper)
                                                 .admin(finalAdmin)
@@ -350,7 +363,7 @@ public class PaperService {
                                                 .build();
 
                                 ArticleEntity savedArticle = articleRepository.save(article);
-                                log.info("Article ????꾨즺: id={}, title={}, adminId={}",
+                                log.info("Article 저장 완료: id={}, title={}, adminId={}",
                                                 savedArticle.getId(), savedArticle.getTitle(), adminId);
 
                                 List<String> savedKeywords = new ArrayList<>();
@@ -359,7 +372,7 @@ public class PaperService {
                                                 continue;
                                         }
 
-                                        // ?ㅼ썙??議댁옱 ?щ? ?뺤씤 ?????
+                                        // 키워드 존재 여부 확인 후 저장
                                         com.qroad.be.domain.KeywordEntity keyword = keywordRepository
                                                         .findByName(keywordName.trim())
                                                         .orElseGet(() -> {
@@ -377,33 +390,33 @@ public class PaperService {
 
                                         articleKeywordRepository.save(articleKeyword);
                                         savedKeywords.add(keywordName.trim());
-                                        log.info("ArticleKeyword 留ㅽ븨 ?꾨즺: articleId={}, keyword={}",
+                                        log.info("ArticleKeyword 매핑 완료: articleId={}, keyword={}",
                                                         savedArticle.getId(), keywordName);
                                 }
 
-                                // ?꾨쿋???앹꽦 諛????
-                                // 二쇱꽍: 諛쒗뻾 API濡??앹꽦??湲곗궗??vector_articles????ν븯吏 ?딆쓬
-                                // ?댁쑀: link 而щ읆???놁뼱???ㅻⅨ 湲곗궗???곌? 湲곗궗濡?留ㅽ븨?????ㅻ쪟 諛쒖깮
-                                // 諛쒗뻾 湲곗궗???щ·留?湲곗궗瑜??곌? 湲곗궗濡?李얠쓣 ???덉?留? ??갑??留ㅽ븨? ?섏? ?딆쓬
+                                // 임베딩 생성 및 저장
+                                // 주석: 발행 API로 생성된 기사는 vector_articles에 저장하지 않음
+                                // 이유: link 컬럼이 없어서 다른 기사의 연관 기사로 매핑될 때 오류 발생
+                                // 발행 기사는 크롤링 기사를 연관 기사로 찾을 수 있지만, 역방향 매핑은 되지 않음
                                 /*
                                  * try {
                                  * List<Double> embedding = llmService.getEmbedding(chunk.getContent());
-                                 * String vectorString = embedding.toString(); // [0.1, 0.2, ...] ?뺤떇
+                                 * String vectorString = embedding.toString(); // [0.1, 0.2, ...] 형식
                                  *
                                  * String sql =
                                  * "INSERT INTO vector_articles (article_id, title, published_date, vector) VALUES (?, ?, ?, ?::vector)"
                                  * ;
                                  * jdbcTemplate.update(sql, savedArticle.getId(), savedArticle.getTitle(),
                                  * savedPaper.getPublishedDate(), vectorString);
-                                 * log.info("VectorArticle ????꾨즺: articleId={}", savedArticle.getId());
+                                 * log.info("VectorArticle 저장 완료: articleId={}", savedArticle.getId());
                                  * } catch (Exception e) {
-                                 * log.error("?꾨쿋??????ㅽ뙣: articleId={}", savedArticle.getId(), e);
+                                 * log.error("임베딩 저장 실패: articleId={}", savedArticle.getId(), e);
                                  * }
                                  */
 
-                                // ?곌? ??ぉ ?앹꽦? FINDING_RELATED ?④퀎?먯꽌 蹂꾨룄 吏꾪뻾
+                                // 연관 항목 생성은 FINDING_RELATED 단계에서 별도 진행
 
-                                // ?묐떟 DTO ?앹꽦
+                                // 응답 DTO 생성
                                 com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse = com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO
                                                 .builder()
                                                 .id(savedArticle.getId())
@@ -418,7 +431,7 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
                         for (com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse : articleResponses) {
-                                // ??λ맂 ?ㅼ썙??湲곗? ?곌? 湲곗궗/?뺤콉 ?앹꽦
+                                // 저장된 키워드 기반 연관 기사/정책 생성
                                 updateRelatedArticles(articleResponse.getId(), articleResponse.getKeywords());
                                 updateRelatedPolicies(articleResponse.getId(), articleResponse.getKeywords());
 
@@ -431,7 +444,7 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.SAVING, () -> {
                 });
-                log.info("?좊Ц 吏硫??앹꽦 ?꾨즺: paperId={}, 湲곗궗 ??{}, adminId={}",
+                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
                                 savedPaper.getId(), articleChunks.size(), adminId);
 
                 return com.qroad.be.dto.PaperCreateResponseDTO.builder()
@@ -442,7 +455,7 @@ public class PaperService {
         }
 
         /**
-         * 鍮꾨룞湲??묒뾽?먯꽌留?吏꾪뻾瑜좎쓣 媛깆떊?쒕떎.
+         * 비동기 작업에서만 진행률을 갱신한다.
          */
         private void moveTo(String jobId, PublicationStep step) {
                 if (jobId == null) {
@@ -462,11 +475,11 @@ public class PaperService {
         }
 
         /**
-         * ?곌? 湲곗궗 ?낅뜲?댄듃
-         * 1. 湲곗〈 ?곌? 湲곗궗 ??젣
-         * 2. ?ㅼ썙??湲곕컲 ?꾨쿋???앹꽦
-         * 3. 踰≫꽣 ?좎궗??寃?됱쑝濡??곌? 湲곗궗 3媛?異붿텧
-         * 4. ?곌? 湲곗궗 ???
+         * 연관 기사 업데이트
+         * 1. 기존 연관 기사 삭제
+         * 2. 키워드 기반 임베딩 생성
+         * 3. 벡터 유사도 검색으로 연관 기사 3개 추출
+         * 4. 연관 기사 저장
          */
         @Transactional
         public void updateRelatedArticles(Long articleId, List<String> keywords) {
@@ -474,22 +487,22 @@ public class PaperService {
                         return;
                 }
 
-                // 1. 湲곗〈 ?곌? 湲곗궗 ??젣
+                // 1. 기존 연관 기사 삭제
                 articleRelatedRepository.deleteByArticleId(articleId);
 
-                // 2. ?ㅼ썙??湲곕컲 ?꾨쿋???앹꽦
+                // 2. 키워드 기반 임베딩 생성
                 String keywordText = String.join(" ", keywords);
                 List<Double> embedding;
                 try {
                         embedding = llmService.getEmbedding(keywordText);
                 } catch (Exception e) {
-                        log.error("?곌? 湲곗궗 ?앹꽦???꾪븳 ?꾨쿋???ㅽ뙣: articleId={}", articleId, e);
+                        log.error("연관 기사 생성을 위한 임베딩 실패: articleId={}", articleId, e);
                         return;
                 }
                 String vectorString = embedding.toString();
 
-                // 3. 踰≫꽣 ?좎궗??寃??(L2 嫄곕━ 湲곗?, ?먭린 ?먯떊 ?쒖쇅, ?곸쐞 3媛?
-                // vector_articles ?뚯씠釉붿뿉??寃??
+                // 3. 벡터 유사도 검색 (L2 거리 기준, 자기 자신 제외, 상위 3개)
+                // vector_articles 테이블에서 검색
                 String sql = """
                                     SELECT article_id, vector <-> ?::vector as distance
                                     FROM vector_articles
@@ -503,15 +516,15 @@ public class PaperService {
                 ArticleEntity sourceArticle = articleRepository.findById(articleId)
                                 .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
 
-                // 4. ?곌? 湲곗궗 ???
+                // 4. 연관 기사 저장
                 for (Map<String, Object> row : rows) {
                         Long relatedArticleId = ((Number) row.get("article_id")).longValue();
                         Double distance = ((Number) row.get("distance")).doubleValue();
-                        // ?좎궗???먯닔 蹂??(嫄곕━媛 0?대㈃ ?좎궗??1, 嫄곕━媛 硫?섎줉 0???섎졃?섎룄濡?
-                        // 媛꾨떒?섍쾶 1 / (1 + distance) ?ъ슜?섍굅?? 洹몃깷 distance ???(?ш린?쒕뒗 distance媛 ?묒쓣?섎줉 ?좎궗??
-                        // ArticleRelatedEntity??score???믪쓣?섎줉 ?좎궗??寃껋쑝濡?媛?뺥븯硫?蹂???꾩슂.
-                        // ?ш린?쒕뒗 1 - distance (肄붿궗??嫄곕━??寃쎌슦) ?깆쓣 ?????덉쑝?? L2 嫄곕━?대?濡??곸젅??蹂??
-                        // ?쇰떒 distance ?먯껜瑜???ν븯嫄곕굹, 1/(1+distance)濡????
+                        // 유사도 점수 변환 (거리가 0이면 유사도 1, 거리가 멀수록 0에 수렴하도록)
+                        // 간단하게 1 / (1 + distance) 사용하거나, 그냥 distance 저장 (여기서는 distance가 작을수록 유사함)
+                        // ArticleRelatedEntity의 score는 높을수록 유사한 것으로 가정하면 변환 필요.
+                        // 여기서는 1 - distance (코사인 거리의 경우) 등을 쓸 수 있으나, L2 거리이므로 적절히 변환.
+                        // 일단 distance 자체를 저장하거나, 1/(1+distance)로 저장.
                         Double score = 1.0 / (1.0 + distance);
 
                         ArticleEntity relatedArticle = articleRepository.findById(relatedArticleId)
@@ -527,14 +540,14 @@ public class PaperService {
                                                 .build();
 
                                 articleRelatedRepository.save(relatedEntity);
-                                log.info("?곌? 湲곗궗 ????꾨즺: source={}, related={}, score={}", articleId, relatedArticleId,
+                                log.info("연관 기사 저장 완료: source={}, related={}, score={}", articleId, relatedArticleId,
                                                 score);
                         }
                 }
         }
 
         /**
-         * ?곌? ?뺤콉 ?낅뜲?댄듃 (?ㅼ썙??湲곕컲 踰≫꽣 ?좎궗??寃??
+         * 연관 정책 업데이트 (키워드 기반 벡터 유사도 검색)
          */
         @Transactional
         public void updateRelatedPolicies(Long articleId, List<String> keywords) {
@@ -542,21 +555,21 @@ public class PaperService {
                         return;
                 }
 
-                // 1. 湲곗〈 ?곌? ?뺤콉 ??젣
+                // 1. 기존 연관 정책 삭제
                 policyArticleRelatedRepository.deleteByArticleId(articleId);
 
-                // 2. ?ㅼ썙??湲곕컲 ?꾨쿋???앹꽦
+                // 2. 키워드 기반 임베딩 생성
                 String keywordText = String.join(" ", keywords);
                 List<Double> embedding;
                 try {
                         embedding = llmService.getEmbedding(keywordText);
                 } catch (Exception e) {
-                        log.error("?곌? ?뺤콉 ?앹꽦???꾪븳 ?꾨쿋???ㅽ뙣: articleId={}", articleId, e);
+                        log.error("연관 정책 생성을 위한 임베딩 실패: articleId={}", articleId, e);
                         return;
                 }
                 String vectorString = embedding.toString();
 
-                // 3. 踰≫꽣 ?좎궗??寃??(L2 嫄곕━ 湲곗?, ?곸쐞 3媛?
+                // 3. 벡터 유사도 검색 (L2 거리 기준, 상위 3개)
                 String sql = """
                                     SELECT policy_id, vector <-> ?::vector as distance
                                     FROM vector_policy
@@ -569,7 +582,7 @@ public class PaperService {
                 ArticleEntity sourceArticle = articleRepository.findById(articleId)
                                 .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
 
-                // 4. ?곌? ?뺤콉 ???
+                // 4. 연관 정책 저장
                 for (Map<String, Object> row : rows) {
                         Long policyId = ((Number) row.get("policy_id")).longValue();
                         Double distance = ((Number) row.get("distance")).doubleValue();
@@ -589,14 +602,14 @@ public class PaperService {
                                                 .build();
 
                                 policyArticleRelatedRepository.save(relatedEntity);
-                                log.info("?곌? ?뺤콉 ????꾨즺: article={}, policy={}, score={}",
+                                log.info("연관 정책 저장 완료: article={}, policy={}, score={}",
                                                 articleId, policyId, score);
                         }
                 }
         }
 
         /**
-         * 湲곗궗 ?섏젙 (?붿빟 諛??ㅼ썙??
+         * 기사 수정 (요약 및 키워드)
          */
         @Transactional
         public com.qroad.be.dto.ArticleUpdateResponseDTO updateArticle(Long articleId,
@@ -604,17 +617,17 @@ public class PaperService {
                 ArticleEntity article = articleRepository.findById(articleId)
                                 .orElseThrow(() -> new RuntimeException("Article not found"));
 
-                // ?붿빟 ?섏젙
+                // 요약 수정
                 if (request.getSummary() != null) {
                         article.setSummary(request.getSummary());
                 }
 
-                // ?ㅼ썙???섏젙
+                // 키워드 수정
                 if (request.getKeywords() != null) {
-                        // 湲곗〈 ?ㅼ썙??留ㅽ븨 ??젣
+                        // 기존 키워드 매핑 삭제
                         articleKeywordRepository.deleteByArticleId(articleId);
 
-                        // ???ㅼ썙?????諛?留ㅽ븨
+                        // 새 키워드 저장 및 매핑
                         for (String keywordName : request.getKeywords()) {
                                 if (keywordName == null || keywordName.trim().isEmpty())
                                         continue;
@@ -632,15 +645,15 @@ public class PaperService {
                                                 .build());
                         }
 
-                        // ?곌? 湲곗궗 ?낅뜲?댄듃
+                        // 연관 기사 업데이트
                         updateRelatedArticles(articleId, request.getKeywords());
-                        // ?곌? ?뺤콉 ?낅뜲?댄듃
+                        // 연관 정책 업데이트
                         updateRelatedPolicies(articleId, request.getKeywords());
                 }
 
                 ArticleEntity savedArticle = articleRepository.save(article);
 
-                // 理쒖떊 ?ㅼ썙??議고쉶
+                // 최신 키워드 조회
                 List<String> currentKeywords = getKeywordsForArticle(savedArticle.getId());
 
                 return com.qroad.be.dto.ArticleUpdateResponseDTO.builder()
@@ -652,7 +665,7 @@ public class PaperService {
         }
 
         /**
-         * LLM??遺꾨쪟??移댄뀒怨좊━??留욌뒗 誘몃━ 留뚮뱾?댁쭊 AI ?대?吏 寃쎈줈(S3 Key)瑜?諛섑솚?⑸땲??
+         * LLM이 분류한 카테고리에 맞는 미리 만들어진 AI 이미지 경로(S3 Key)를 반환합니다.
          */
         private boolean isNonArticleTitle(String title, String summary) {
                 String rawTitle = title == null ? "" : title;
@@ -700,14 +713,14 @@ public class PaperService {
         }
 
         /**
-         * finalize ?꾨즺 ??DB??file_path 媛깆떊
+         * finalize 완료 후 DB의 file_path 갱신
          */
         @Transactional
         public void updateFilePath(Long paperId, String filePath) {
                 PaperEntity paper = paperRepository.findById(paperId)
                                 .orElseThrow(() -> new RuntimeException("Paper not found: " + paperId));
                 paper.setFilePath(filePath);
-                log.info("filePath 媛깆떊 ?꾨즺: paperId={}, filePath={}", paperId, filePath);
+                log.info("filePath 갱신 완료: paperId={}, filePath={}", paperId, filePath);
         }
 }
 
