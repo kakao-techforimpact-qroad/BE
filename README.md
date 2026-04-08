@@ -164,6 +164,3 @@ gradlew.bat bootRun
 
 현재 상태:
 - 빌드는 성공합니다.
-
-## 배포 체크리스트
-- 배포 전 최종 점검 문서: [pre-deploy-checklist.md](docs/pre-deploy-checklist.md)

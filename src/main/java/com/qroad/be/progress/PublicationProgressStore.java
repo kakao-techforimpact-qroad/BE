@@ -62,11 +62,11 @@ public class PublicationProgressStore {
         int end = PublicationStep.ANALYSIS_FINALIZING.getProgress();
         int range = Math.max(1, end - start);
         int progress = start + (boundedProcessed * (range - 1)) / total;
-        String message = "기사 분리 및 분석 중... (" + boundedProcessed + "/" + total + ")";
+        String message = "기사 분리 및 분석 중,,, (" + boundedProcessed + "/" + total + ")";
 
         progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
                 .status(PublicationJobStatus.PROCESSING)
-                .progress(Math.max(existing.getProgress(), progress))
+                .progress(progress)
                 .message(message)
                 .paperId(existing.getPaperId())
                 .timestamp(Instant.now())
@@ -83,7 +83,7 @@ public class PublicationProgressStore {
         int end = PublicationStep.CHUNKING_AND_ANALYZING.getProgress();
         int range = Math.max(1, end - start);
         int progress = start + (boundedProcessed * (range - 1)) / total;
-        String message = "PDF 읽는 중... (" + boundedProcessed + "/" + total + ")";
+        String message = "PDF 내용 확인 중... (" + boundedProcessed + "/" + total + ")";
 
         progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
                 .status(PublicationJobStatus.PROCESSING)

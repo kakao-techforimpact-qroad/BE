@@ -91,6 +91,3 @@ ls -al ~/log/qroad-be
 - Container log directory: `/log`
 - Host log directory (volume): `~/log/qroad-be`
 - Daily files: `YYYY-MM-DD.log` (example: `2026-03-29.log`)
-
-## 배포 전 체크리스트
-- 배포 전 점검 항목 문서: [pre-deploy-checklist.md](./pre-deploy-checklist.md)

@@ -8,8 +8,6 @@ package com.qroad.be.pdf;
 public class PdfArticle {
     private String id;
     private String title;
-    private String reporter;
-    private String email;
     private double[] titleBbox;
     private double[] bodyBbox;
     private String text;
@@ -31,22 +29,6 @@ public class PdfArticle {
 
     public void setTitle(String title) {
         this.title = title;
-    }
-
-    public String getReporter() {
-        return reporter;
-    }
-
-    public void setReporter(String reporter) {
-        this.reporter = reporter;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
     }
 
     public double[] getTitleBbox() {
