@@ -43,5 +43,5 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     @Query("SELECT ak.keyword.name FROM ArticleKeywordEntity ak WHERE ak.article.id = :articleId")
     List<String> findKeywordNamesByArticleId(Long articleId);
 
+    boolean existsByLink(String link);
 }
-
