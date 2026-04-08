@@ -73,6 +73,27 @@ public class PublicationProgressStore {
                 .build());
     }
 
+    public void updatePdfReadingProgress(String jobId, int processed, int total) {
+        if (total <= 0) {
+            return;
+        }
+
+        int boundedProcessed = Math.max(0, Math.min(processed, total));
+        int start = PublicationStep.PDF_READING.getProgress();
+        int end = PublicationStep.CHUNKING_AND_ANALYZING.getProgress();
+        int range = Math.max(1, end - start);
+        int progress = start + (boundedProcessed * (range - 1)) / total;
+        String message = "PDF 내용 확인 중... (" + boundedProcessed + "/" + total + ")";
+
+        progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
+                .status(PublicationJobStatus.PROCESSING)
+                .progress(Math.max(existing.getProgress(), progress))
+                .message(message)
+                .paperId(existing.getPaperId())
+                .timestamp(Instant.now())
+                .build());
+    }
+
     public void updateRelatedProgress(String jobId, int processed, int total) {
         if (total <= 0) {
             return;
@@ -83,7 +104,7 @@ public class PublicationProgressStore {
         int end = PublicationStep.SAVING.getProgress();
         int range = Math.max(1, end - start);
         int progress = start + (boundedProcessed * (range - 1)) / total;
-        String message = "Finding related items... (" + boundedProcessed + "/" + total + ")";
+        String message = "연관 기사/정책 생성 중... (" + boundedProcessed + "/" + total + ")";
 
         progressMap.computeIfPresent(jobId, (ignored, existing) -> PublicationProgressDto.builder()
                 .status(PublicationJobStatus.PROCESSING)

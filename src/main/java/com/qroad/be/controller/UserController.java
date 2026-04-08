@@ -15,8 +15,8 @@ public class UserController {
 
     private final UserMainService userMainService;
 
-    @GetMapping("{paperId}")
-    public ResponseEntity<UserMainDTO> getPagerByPaperId(@RequestParam("paper_id") Long paperId){
+    @GetMapping("/{paper_id}")
+    public ResponseEntity<UserMainDTO> getPagerByPaperId(@PathVariable("paper_id") Long paperId){
         log.info("in UserController: getPagerByPaperId");
 
         UserMainDTO userMainDTO = userMainService.getPagerById(paperId);
