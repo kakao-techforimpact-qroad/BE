@@ -40,7 +40,7 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
-        // LLM? ???? ??? ????
+        // LLM이 비기사로 분류한 카테고리
         private static final Set<String> NON_ARTICLE_CATEGORIES = Set.of(
                 "\uad11\uace0\u00b7\ud64d\ubcf4", "\ucc44\uc6a9\u00b7\ubaa8\uc9d1 \uacf5\uace0", "\uc785\ucc30\u00b7\ud589\uc815 \uacf5\uace0"
         );
@@ -252,11 +252,11 @@ public class PaperService {
          */
 
         /**
-         * 신문 지면 생성 및 기사 청킹/분석
+         * 신문 지면 생성 및 기사 추출/분석
          * 1. Paper 저장
-         * 2. GPT로 기사 청킹 및 요약/키워드 추출
+         * 2. LLM으로 기사 분석 및 요약/키워드 추출
          * 3. Article 저장
-         * 4. Keyword 저장 (중복 체크)
+         * 4. Keyword 저장(중복 체크)
          * 5. ArticleKeyword 매핑
          * 6. 임베딩 생성 및 vector_articles 저장
          * 7. 연관 기사 생성 (updateRelatedArticles 호출)
@@ -346,11 +346,13 @@ public class PaperService {
                 final AdminEntity finalAdmin = admin;
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
                 List<com.qroad.be.dto.ArticleChunkDTO> filteredChunks = new ArrayList<>();
+                List<Integer> filteredPages = new ArrayList<>();
                 final int totalChunks = articleChunks.size();
                 AtomicInteger relatedProcessed = new AtomicInteger(0);
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
-                        for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                        for (int chunkIndex = 0; chunkIndex < articleChunks.size(); chunkIndex++) {
+                                com.qroad.be.dto.ArticleChunkDTO chunk = articleChunks.get(chunkIndex);
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
                                 String category = chunk.getCategory() != null ? chunk.getCategory() : "";
                                 String title = chunk.getTitle() != null ? chunk.getTitle() : "";
@@ -360,11 +362,16 @@ public class PaperService {
                                                 .anyMatch(title::contains);
                                 boolean isNonArticleByContent = isLikelyAdOrPromoChunk(chunk);
                                 if (isAdCategory || isNonArticleTitle || isNonArticleByContent) {
-                                        log.info("비기사/광고/공고 저장 제외: title={}, category={}",
+                                        log.info("비기사 광고/공고 저장 제외: title={}, category={}",
                                                 title, category);
                                         continue;
                                 }
                                 filteredChunks.add(chunk);
+                                Integer page = null;
+                                if (chunkIndex < extraction.getArticles().size()) {
+                                        page = extraction.getArticles().get(chunkIndex).getPage();
+                                }
+                                filteredPages.add(page);
 
                                 // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
@@ -459,9 +466,9 @@ public class PaperService {
                         }
                 });
 
-                String filteredContent = buildFilteredPaperContent(filteredChunks);
+                String filteredContent = buildFilteredPaperContent(filteredChunks, filteredPages);
                 savedPaper.setContent(filteredContent);
-                log.info("필터링 후 paper.content 갱신 완료: keepCount={}, contentLength={}",
+                log.info("필터링된 paper.content 갱신 완료: keepCount={}, contentLength={}",
                                 filteredChunks.size(), filteredContent.length());
 
                 runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
@@ -563,10 +570,7 @@ public class PaperService {
                         Long relatedArticleId = ((Number) rawArticleId).longValue();
                         Double distance = ((Number) rawDistance).doubleValue();
                         // 유사도 점수 변환 (거리가 0이면 유사도 1, 거리가 멀수록 0에 수렴하도록)
-                        // 간단하게 1 / (1 + distance) 사용하거나, 그냥 distance 저장 (여기서는 distance가 작을수록 유사함)
-                        // ArticleRelatedEntity의 score는 높을수록 유사한 것으로 가정하면 변환 필요.
-                        // 여기서는 1 - distance (코사인 거리의 경우) 등을 쓸 수 있으나, L2 거리이므로 적절히 변환.
-                        // 일단 distance 자체를 저장하거나, 1/(1+distance)로 저장.
+                        // 간단하게 1 / (1 + distance) 사용
                         Double score = 1.0 / (1.0 + distance);
 
                         ArticleEntity relatedArticle = articleRepository.findById(relatedArticleId)
@@ -764,7 +768,7 @@ public class PaperService {
                 return conditionA || conditionB;
         }
 
-        private String buildFilteredPaperContent(List<com.qroad.be.dto.ArticleChunkDTO> keptChunks) {
+        private String buildFilteredPaperContent(List<com.qroad.be.dto.ArticleChunkDTO> keptChunks, List<Integer> keptPages) {
                 if (keptChunks == null || keptChunks.isEmpty()) {
                         return "";
                 }
@@ -774,9 +778,11 @@ public class PaperService {
                         com.qroad.be.dto.ArticleChunkDTO chunk = keptChunks.get(i);
                         String title = chunk.getTitle() == null ? "" : chunk.getTitle().trim();
                         String body = chunk.getContent() == null ? "" : chunk.getContent().trim();
+                        Integer page = (keptPages != null && i < keptPages.size()) ? keptPages.get(i) : null;
+                        String pageLabel = (page != null && page > 0) ? page + "면" : "페이지 미상";
 
                         sb.append("=".repeat(60)).append("\n");
-                        sb.append(String.format("[기사 %d]%n", i + 1));
+                        sb.append(String.format("[기사 %d | 신문 %s]%n", i + 1, pageLabel));
                         sb.append("=".repeat(60)).append("\n");
                         sb.append("제목: ").append(title).append("\n\n");
                         sb.append(body).append("\n\n");

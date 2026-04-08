@@ -798,6 +798,82 @@ public class PdfExtractorService {
         return result;
     }
 
+    /**
+     * 신문 지면에서 2줄(또는 3줄)로 분리된 제목을 1개의 제목 블록으로 병합한다.
+     */
+    private List<Line> mergeStackedTitleCandidates(List<Line> titles, double bodyMedian, double pageWidth) {
+        if (titles == null || titles.size() < 2) {
+            return titles == null ? Collections.emptyList() : titles;
+        }
+
+        List<Line> sorted = new ArrayList<>(titles);
+        sorted.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+
+        List<Line> merged = new ArrayList<>();
+        boolean[] used = new boolean[sorted.size()];
+
+        for (int i = 0; i < sorted.size(); i++) {
+            if (used[i]) {
+                continue;
+            }
+            Line base = sorted.get(i);
+            used[i] = true;
+
+            StringBuilder text = new StringBuilder(base.getText() == null ? "" : base.getText().trim());
+            double[] bbox = Arrays.copyOf(base.getBbox(), 4);
+            double maxSize = base.getMaxSize();
+            boolean bold = base.isBold();
+            Line anchor = base;
+
+            for (int j = i + 1; j < sorted.size(); j++) {
+                if (used[j]) {
+                    continue;
+                }
+
+                Line next = sorted.get(j);
+                double gap = next.getY0() - anchor.getY1();
+                if (gap > bodyMedian * 2.4) {
+                    break;
+                }
+                if (gap < -bodyMedian * 0.6) {
+                    continue;
+                }
+
+                double overlap = horizontalOverlapRatio(anchor, next);
+                double leftDelta = Math.abs(anchor.getX0() - next.getX0());
+                double sizeRatio = Math.min(anchor.getMaxSize(), next.getMaxSize())
+                        / Math.max(anchor.getMaxSize(), next.getMaxSize());
+
+                boolean closeInX = leftDelta <= pageWidth * 0.045;
+                boolean similarSize = sizeRatio >= 0.80;
+                if (!(overlap >= 0.50 || closeInX) || !similarSize) {
+                    continue;
+                }
+
+                used[j] = true;
+                String nextText = next.getText() == null ? "" : next.getText().trim();
+                if (!nextText.isEmpty()) {
+                    if (text.length() > 0) {
+                        text.append("\n");
+                    }
+                    text.append(nextText);
+                }
+                bbox[0] = Math.min(bbox[0], next.getBbox()[0]);
+                bbox[1] = Math.min(bbox[1], next.getBbox()[1]);
+                bbox[2] = Math.max(bbox[2], next.getBbox()[2]);
+                bbox[3] = Math.max(bbox[3], next.getBbox()[3]);
+                maxSize = Math.max(maxSize, next.getMaxSize());
+                bold = bold || next.isBold();
+                anchor = next;
+            }
+
+            merged.add(new Line(text.toString().trim(), bbox, maxSize, bold));
+        }
+
+        merged.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return merged;
+    }
+
     private List<Line> restoreStandaloneDroppedTitles(
             List<Line> originalCandidates,
             List<Line> filteredCandidates,
@@ -1149,6 +1225,7 @@ public class PdfExtractorService {
                 .collect(Collectors.toList());
         titles = filterMainTitleCandidates(titles, lines, bodyMedian, W);
         titles = augmentMissingUpperHeadlinePerColumn(titles, lines, bodyMedian, W, H);
+        titles = mergeStackedTitleCandidates(titles, bodyMedian, W);
 
         if (titles.isEmpty()) {
             return Collections.emptyList();
@@ -1357,6 +1434,8 @@ public class PdfExtractorService {
             fillReporterAndEmail(article);
         }
 
+        articles = removeDuplicateArticles(articles);
+
         return articles;
     }
 
@@ -1487,6 +1566,88 @@ public class PdfExtractorService {
     }
 
     // ──────────────────────── internal process ────────────────────────
+
+    private List<PdfArticle> removeDuplicateArticles(List<PdfArticle> articles) {
+        if (articles == null || articles.size() < 2) {
+            return articles;
+        }
+
+        List<PdfArticle> kept = new ArrayList<>();
+        for (PdfArticle candidate : articles) {
+            PdfArticle duplicate = null;
+            for (PdfArticle existing : kept) {
+                boolean sameTitle = normalizeForCompare(candidate.getTitle())
+                        .equals(normalizeForCompare(existing.getTitle()));
+                boolean overlapHigh = bboxOverlapRatio(candidate.getBodyBbox(), existing.getBodyBbox()) >= 0.50;
+                boolean containHigh = isHighContainment(
+                        normalizeForCompare(candidate.getText()),
+                        normalizeForCompare(existing.getText()));
+                boolean sameColumn = candidate.getColumnIndex() == existing.getColumnIndex();
+                double titleYDistance = Math.abs(candidate.getTitleBbox()[1] - existing.getTitleBbox()[1]);
+                boolean sameTitleNear = sameTitle && (sameColumn || titleYDistance <= 450.0);
+
+                if (sameTitleNear || (sameTitle && overlapHigh) || (sameTitle && containHigh) || (overlapHigh && containHigh)) {
+                    duplicate = existing;
+                    break;
+                }
+            }
+
+            if (duplicate == null) {
+                kept.add(candidate);
+                continue;
+            }
+
+            int candLen = normalizeForCompare(candidate.getText()).length();
+            int dupLen = normalizeForCompare(duplicate.getText()).length();
+            if (candLen > dupLen) {
+                kept.remove(duplicate);
+                kept.add(candidate);
+            }
+        }
+
+        kept.sort(Comparator.comparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox()[0]));
+        return kept;
+    }
+
+    private String normalizeForCompare(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\uac00-\\ud7a3]+", "");
+    }
+
+    private boolean isHighContainment(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+        String longer = a.length() >= b.length() ? a : b;
+        String shorter = a.length() >= b.length() ? b : a;
+        if (shorter.length() < 40) {
+            return false;
+        }
+        return longer.contains(shorter) && ((double) shorter.length() / longer.length()) >= 0.40;
+    }
+
+    private double bboxOverlapRatio(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) {
+            return 0.0;
+        }
+        double ix0 = Math.max(a[0], b[0]);
+        double iy0 = Math.max(a[1], b[1]);
+        double ix1 = Math.min(a[2], b[2]);
+        double iy1 = Math.min(a[3], b[3]);
+        double interW = Math.max(0.0, ix1 - ix0);
+        double interH = Math.max(0.0, iy1 - iy0);
+        double interArea = interW * interH;
+        if (interArea <= 0.0) {
+            return 0.0;
+        }
+        double areaA = Math.max(1.0, (a[2] - a[0]) * (a[3] - a[1]));
+        double areaB = Math.max(1.0, (b[2] - b[0]) * (b[3] - b[1]));
+        return interArea / Math.min(areaA, areaB);
+    }
 
     private ProcessResult processPdf(InputStream pdfStream) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(pdfStream.readAllBytes())) {
