@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
+import com.qroad.be.pdf.PdfExtractorEngine.ExtractionResult;
 
 @Slf4j
 @Service

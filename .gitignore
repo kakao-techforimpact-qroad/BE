@@ -43,3 +43,7 @@ application-prod.properties
 /tmp/
 *.swp
 .env
+
+### Local PDF Segmentation Test Artifacts ###
+/1825.pdf
+/src/test/java/com/qroad/be/PdfReporterMissingDumpTest.java
