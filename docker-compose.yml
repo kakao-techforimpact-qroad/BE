@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qroad-be:local
+    container_name: qroad-be-local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Seoul
+      LOG_DIR: /log
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./log:/log
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -v grep | grep 'java -jar /app/app.jar' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
