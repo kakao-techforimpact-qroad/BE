@@ -1,13 +1,13 @@
 package com.qroad.be;
 
+import com.qroad.be.pdf.OcrService;
 import com.qroad.be.pdf.PdfExtractorService;
 import org.junit.jupiter.api.Test;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-
-import com.qroad.be.pdf.OcrService;
 
 public class PdfExtractorTest {
 
@@ -15,28 +15,24 @@ public class PdfExtractorTest {
     public void testExtraction() throws Exception {
         System.out.println("Starting PDF extraction test...");
         PdfExtractorService service = new PdfExtractorService(new OcrService());
-        Path pdfPath = Paths.get("/Users/munjin-yeong/개발/qroad/1825.pdf");
+        Path pdfPath = Paths.get("1825.pdf").toAbsolutePath();
         if (!Files.exists(pdfPath)) {
             System.err.println("File not found: " + pdfPath);
             return;
         }
-        
+
         byte[] pdfBytes = Files.readAllBytes(pdfPath);
-        
         PdfExtractorService.ExtractionResult result = service.extractWithImages(pdfBytes);
-        
-        // Create output directory with timestamp
+
         String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-        Path outputDir = Paths.get("/Users/munjin-yeong/개발/qroad/테스트/test_" + timestamp);
+        Path outputDir = Paths.get("build", "pdf-test-output", "test_" + timestamp).toAbsolutePath();
         Files.createDirectories(outputDir);
         System.out.println("Saving results to directory: " + outputDir);
-        
-        // Save text
+
         Path textOut = outputDir.resolve("1825_extracted.txt");
         Files.writeString(textOut, result.getText());
         System.out.println("Saved text to: " + textOut);
-        
-        // Save images
+
         List<PdfExtractorService.ArticleImageData> images = result.getArticleImages();
         System.out.println("Found " + images.size() + " images.");
         int idx = 1;

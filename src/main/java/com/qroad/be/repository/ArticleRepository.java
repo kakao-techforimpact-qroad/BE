@@ -18,9 +18,10 @@ public interface ArticleRepository extends JpaRepository<ArticleEntity, Long> {
     List<ArticleEntity> findByAdminId(Long adminId);
     List<ArticleEntity> findByReporter(String reporter);
     List<ArticleEntity> findByPaper_IdAndStatus(Long paperId, String status);
+    List<ArticleEntity> findByPaper_IdAndStatusOrderByIdAsc(Long paperId, String status);
 
     @Query("SELECT new com.qroad.be.dto.ArticleSimpleDTO(a.id, a.title, a.imagePath) " +
-            "FROM ArticleEntity a WHERE a.paper.id = :paperId")
+            "FROM ArticleEntity a WHERE a.paper.id = :paperId ORDER BY a.id ASC")
     List<ArticleSimpleDTO> findArticlesByPaperId(@Param("paperId") Long paperId);
 
     @Query("""

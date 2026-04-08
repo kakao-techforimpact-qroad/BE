@@ -41,7 +41,10 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 public class PaperService {
 
         private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
-                        "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0", "\uc54c\ub9bd\ub2c8\ub2e4", "\uc8fc\ubbfc\uac8c\uc2dc\ud310");
+                        "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0",
+                        "\uc54c\ub9bd\ub2c8\ub2e4", "\uc8fc\ubbfc\uac8c\uc2dc\ud310", "\uc6b0\ub9ac\ub3d9\ub124",
+                        "\uc0c1\uac00", "\uc0ac\ubb34\uc2e4", "\uc138 \ub193\uc2b5\ub2c8\ub2e4", "\ud301\ub2c8\ub2e4",
+                        "\uc0ac\ub78c\uad6c\ud569\ub2c8\ub2e4", "\uc8fc\ud0dd", "\ud1a0\uc9c0", "\ucc3d\uace0");
         private static final List<Pattern> NON_ARTICLE_TITLE_PATTERNS = List.of(
                         Pattern.compile("(?i)\\uc0ac\\s*\\uace0\\s*\\(\\s*\\u793e\\s*\\u544a\\s*\\)"),
                         Pattern.compile("(?i)^\\s*\\uc54c\\ub9bd\\ub2c8\ub2e4\\s*$"),
@@ -156,7 +159,7 @@ public class PaperService {
                 PaperEntity paper = paperRepository.findById(paperId)
                                 .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
 
-                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
+                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatusOrderByIdAsc(paperId, "ACTIVE");
                 Map<Long, List<String>> keywordsByArticleId = getKeywordsForArticles(articles);
 
                 List<ArticleDto> articleDtos = articles.stream()
@@ -333,17 +336,20 @@ public class PaperService {
                 AtomicInteger relatedProcessed = new AtomicInteger(0);
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
-                        for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                        for (int i = 0; i < articleChunks.size(); i++) {
+                                com.qroad.be.dto.ArticleChunkDTO chunk = articleChunks.get(i);
+                                int index = i + 1;
                                 if (isNonArticleTitle(chunk.getTitle(), chunk.getSummary())) {
-                                        log.info("Skip non-article notice by title: {}", chunk.getTitle());
+                                        log.info("기사 저장 제외(비기사): index={}/{}, title={}",
+                                                        index, totalChunks, chunk.getTitle());
                                         continue;
                                 }
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
                                 boolean isAdCategory = AD_CATEGORY_KEYWORDS.stream()
                                                 .anyMatch(kw -> chunk.getCategory().contains(kw));
                                 if (isAdCategory) {
-                                        log.info("광고/홍보/공고 카테고리 저장 제외: title={}, category={}",
-                                                chunk.getTitle(), chunk.getCategory());
+                                        log.info("기사 저장 제외(광고/홍보/공고): index={}/{}, title={}, category={}",
+                                                        index, totalChunks, chunk.getTitle(), chunk.getCategory());
                                         continue;
                                 }
 
@@ -363,8 +369,13 @@ public class PaperService {
                                                 .build();
 
                                 ArticleEntity savedArticle = articleRepository.save(article);
-                                log.info("Article 저장 완료: id={}, title={}, adminId={}",
-                                                savedArticle.getId(), savedArticle.getTitle(), adminId);
+                                log.info("기사 저장 완료: index={}/{}, articleId={}, title={}, category={}, adminId={}",
+                                                index,
+                                                totalChunks,
+                                                savedArticle.getId(),
+                                                savedArticle.getTitle(),
+                                                chunk.getCategory(),
+                                                adminId);
 
                                 List<String> savedKeywords = new ArrayList<>();
                                 for (String keywordName : chunk.getKeywords()) {
@@ -444,8 +455,8 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.SAVING, () -> {
                 });
-                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
-                                savedPaper.getId(), articleChunks.size(), adminId);
+                log.info("신문 지면 생성 완료: paperId={}, 분석기사수={}, 저장기사수={}, adminId={}",
+                                savedPaper.getId(), articleChunks.size(), articleResponses.size(), adminId);
 
                 return com.qroad.be.dto.PaperCreateResponseDTO.builder()
                                 .paperId(savedPaper.getId())
