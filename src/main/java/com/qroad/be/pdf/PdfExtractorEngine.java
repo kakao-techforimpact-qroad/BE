@@ -41,9 +41,9 @@ public class PdfExtractorEngine {
             for (int i = 0; i < result.getArticles().size(); i++) {
                 PdfArticle a = result.getArticles().get(i);
                 sb.append("=".repeat(60)).append("\n");
-                sb.append(String.format("[湲곗궗 %d | ?좊Ц %d硫?| %s]%n", i + 1, a.getPage(), a.getId()));
+                sb.append(String.format("[기사 %d | 지면 %d면 | %s]%n", i + 1, a.getPage(), a.getId()));
                 sb.append("=".repeat(60)).append("\n");
-                sb.append("?쒕ぉ: ").append(a.getTitle().trim()).append("\n\n");
+                sb.append("제목: ").append(a.getTitle().trim()).append("\n\n");
                 sb.append(a.getText().trim()).append("\n\n\n");
             }
             return sb.toString();
@@ -70,23 +70,23 @@ public class PdfExtractorEngine {
                 pageImagesMap.put(pi, new ArrayList<>(pImgs));
 
                 List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
-                int idx = 1;
                 for (PdfArticle a : pageArticles) {
                     a.setPage(pi + 1);
-                    a.setId(String.format("p%02d_a%03d", pi + 1, idx++));
                     allArticles.add(a);
                 }
                 if (progressCallback != null) {
                     progressCallback.accept(pi + 1, totalPages);
                 }
             }
+            allArticles = PdfArticleDeduplicator.removeDuplicateArticles(allArticles);
+            assignStableArticleIds(allArticles);
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < allArticles.size(); i++) {
                 PdfArticle a = allArticles.get(i);
                 sb.append("=".repeat(60)).append("\n");
-                sb.append(String.format("[湲곗궗 %d | ?좊Ц %d硫?| %s]%n", i + 1, a.getPage(), a.getId()));
+                sb.append(String.format("[기사 %d | 지면 %d면 | %s]%n", i + 1, a.getPage(), a.getId()));
                 sb.append("=".repeat(60)).append("\n");
-                sb.append("?쒕ぉ: ").append(a.getTitle().trim()).append("\n\n");
+                sb.append("제목: ").append(a.getTitle().trim()).append("\n\n");
                 sb.append(a.getText().trim()).append("\n\n\n");
             }
             List<ArticleImageData> images = new ArrayList<>();
@@ -143,6 +143,10 @@ public class PdfExtractorEngine {
         if (lines.isEmpty() || sizes.isEmpty()) {
             return Collections.emptyList();
         }
+        if (PdfAdFilter.isLikelyClassifiedPage(lines)) {
+            log.info("분류광고 성격 페이지로 판정되어 기사 추출 제외: page={}", pageIndex + 1);
+            return Collections.emptyList();
+        }
         List<Double> sortedSizes = new ArrayList<>(sizes);
         Collections.sort(sortedSizes);
         double bodyMedian = sortedSizes.get(sortedSizes.size() / 2);
@@ -175,7 +179,7 @@ public class PdfExtractorEngine {
         List<String> reviewCandidates = new ArrayList<>();
         for (Map.Entry<Integer, List<Line>> entry : titlesByCol.entrySet()) {
             int column = entry.getKey();
-            List<Line> titleList = entry.getValue();
+            List<Line> titleList = collapseSubtitleTitles(entry.getValue(), bodyMedian, pageWidth);
             double columnX0 = (column == 0) ? 0 : splits.get(column - 1);
             double columnX1 = (column == splits.size()) ? pageWidth : splits.get(column);
             columnX0 = Math.max(0, columnX0 - margin);
@@ -245,7 +249,7 @@ public class PdfExtractorEngine {
                     List<Line> part2Body = ordered.subList(forcedSplitIdx + 1, ordered.size());
                     String part1Text = part1.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
                     String part2Text = part2Body.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
-                    if (part1Text.length() >= 120 && part2Text.length() >= 120) {
+                    if (part1Text.length() >= 70 && part2Text.length() >= 70) {
                         if (!PdfAdFilter.isLikelyAd(part1Text)) {
                             PdfArticle article1 = new PdfArticle();
                             article1.setTitle(titleText);
@@ -279,7 +283,7 @@ public class PdfExtractorEngine {
                     List<Line> part2 = ordered.subList(splitIdx + 1, ordered.size());
                     String part1Text = part1.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
                     String part2Text = part2.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
-                    if (part1Text.length() >= 120 && part2Text.length() >= 120) {
+                    if (part1Text.length() >= 70 && part2Text.length() >= 70) {
                         if (!PdfAdFilter.isLikelyAd(part1Text)) {
                             PdfArticle article1 = new PdfArticle();
                             article1.setTitle(titleText);
@@ -327,12 +331,252 @@ public class PdfExtractorEngine {
         for (PdfArticle article : articles) {
             PdfReporterResolver.fillReporterAndEmail(article);
         }
+        articles = promoteUpperHeadlineForSubheadingTitles(articles, titles, bodyMedian, pageWidth);
+        articles = supplementMissingQuotedHeadlineArticles(
+                articles, titles, lines, splits, mediaBox, pageWidth, pageHeight, bodyMedian);
         articles = PdfArticleDeduplicator.removeDuplicateArticles(articles);
         for (PdfArticle article : articles) {
             PdfReporterResolver.fillReporterAndEmail(article);
         }
         
         return articles;
+    }
+
+    private List<PdfArticle> supplementMissingQuotedHeadlineArticles(
+            List<PdfArticle> articles,
+            List<Line> titleCandidates,
+            List<Line> lines,
+            List<Double> splits,
+            PDRectangle mediaBox,
+            double pageWidth,
+            double pageHeight,
+            double bodyMedian
+    ) {
+        if (articles == null || titleCandidates == null || titleCandidates.isEmpty()) return articles;
+
+        double margin = pageWidth * 0.05;
+        List<Line> quotedTitles = titleCandidates.stream()
+                .filter(t -> t != null && t.getText() != null)
+                .filter(t -> {
+                    String text = t.getText().trim();
+                    return text.startsWith("\"") || text.startsWith("“") || text.startsWith("‘");
+                })
+                .toList();
+        log.info("[QUOTE-SUPPLEMENT] quotedTitlesCount={}", quotedTitles.size());
+
+        if (quotedTitles.isEmpty()) return articles;
+
+        Set<String> existingTitleKeys = articles.stream()
+                .map(PdfArticle::getTitle)
+                .filter(Objects::nonNull)
+                .map(this::normTitleKey)
+                .collect(Collectors.toSet());
+
+        for (Line qt : quotedTitles) {
+            String qtTitle = PAGE_NUM_STRIP.matcher(qt.getText()).replaceAll("").trim();
+            String qtKey = normTitleKey(qtTitle);
+            if (qtKey.isEmpty()) continue;
+            if (existingTitleKeys.stream().anyMatch(k -> k.contains(qtKey) || qtKey.contains(k))) {
+                log.debug("[QUOTE-SUPPLEMENT] skip existing title={}", qtTitle);
+                continue;
+            }
+
+            int col = PdfColumnSupport.assignCol(qt.getX0(), splits);
+            double colX0 = (col == 0) ? 0 : splits.get(col - 1);
+            double colX1 = (col == splits.size()) ? pageWidth : splits.get(col);
+            double articleX0 = Math.max(0, colX0 - margin);
+            double articleX1 = Math.min(pageWidth, colX1 + margin);
+
+            double y0 = qt.getBbox()[3];
+            double nextTitleTop = titleCandidates.stream()
+                    .filter(t -> t.getY0() > qt.getY0())
+                    .filter(t -> Math.abs(t.getX0() - qt.getX0()) <= pageWidth * 0.20)
+                    .mapToDouble(Line::getY0)
+                    .min()
+                    .orElseGet(() -> titleCandidates.stream()
+                            .filter(t -> PdfColumnSupport.assignCol(t.getX0(), splits) == col)
+                            .filter(t -> t.getY0() > qt.getY0())
+                            .mapToDouble(Line::getY0)
+                            .min()
+                            .orElse(pageHeight));
+            double y1 = Math.max(y0 + bodyMedian * 5.0, nextTitleTop - 2);
+            y1 = Math.min(y1, pageHeight);
+
+            double[] bodyBbox = PdfColumnSupport.clampBbox(new double[]{articleX0, y0, articleX1, y1}, mediaBox);
+            List<Line> bodyLines = PdfColumnSupport.linesInBbox(lines, bodyBbox);
+            List<Line> strictBodyLines = PdfColumnSupport.filterBodyLinesByAnchorSubColumn(
+                    bodyLines, articleX0, articleX1, qt.getX0(), false);
+            List<Line> ordered = PdfColumnSupport.sortLinesReadingOrder(strictBodyLines, pageWidth);
+            String bodyText = ordered.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+
+            if (bodyText.length() < 70) {
+                // Quoted headline은 OCR 흔들림으로 서브컬럼 필터가 본문을 과도 제거하는 경우가 있어 완화 재시도.
+                double relaxedX0 = Math.max(0, qt.getBbox()[0] - pageWidth * 0.18);
+                double relaxedX1 = Math.min(pageWidth, qt.getBbox()[2] + pageWidth * 0.18);
+                double relaxedY1 = Math.min(pageHeight, Math.max(y1, y0 + pageHeight * 0.35));
+                double[] relaxedBbox = PdfColumnSupport.clampBbox(new double[]{relaxedX0, y0, relaxedX1, relaxedY1}, mediaBox);
+                List<Line> relaxedLines = PdfColumnSupport.linesInBbox(lines, relaxedBbox);
+                List<Line> relaxedOrdered = PdfColumnSupport.sortLinesReadingOrder(relaxedLines, pageWidth);
+                String relaxedText = relaxedOrdered.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+                if (relaxedText.length() > bodyText.length()) {
+                    ordered = relaxedOrdered;
+                    bodyText = relaxedText;
+                    bodyBbox = relaxedBbox;
+                }
+            }
+            if (bodyText.length() < 70) {
+                log.info("[QUOTE-SUPPLEMENT] skip short body title={} len={}", qtTitle, bodyText.length());
+                continue;
+            }
+            if (PdfAdFilter.isLikelyAd(bodyText)) {
+                String lower = bodyText.toLowerCase(Locale.ROOT);
+                boolean hasPhone = bodyText.matches("(?s).*\\b\\d{2,3}[-.]\\d{3,4}[-.]\\d{4}\\b.*");
+                boolean hasUrl = lower.contains("http://") || lower.contains("https://") || lower.contains("www.");
+                boolean hasExplicitAdMarker = bodyText.contains("[광고]")
+                        || bodyText.contains("(광고)")
+                        || bodyText.contains("광고문의")
+                        || bodyText.contains("홍보문의");
+                if (hasPhone || hasUrl || hasExplicitAdMarker) {
+                    log.info("[QUOTE-SUPPLEMENT] skip ad body title={}", qtTitle);
+                    continue;
+                }
+                log.info("[QUOTE-SUPPLEMENT] ad-like but accepted for quoted title={}", qtTitle);
+            }
+
+            PdfArticle fallback = new PdfArticle();
+            fallback.setTitle(qtTitle);
+            fallback.setTitleBbox(qt.getBbox());
+            fallback.setBodyBbox(PdfColumnSupport.unionBbox(ordered));
+            fallback.setText(bodyText);
+            fallback.setContinuationToPage(PdfArticlePostProcessor.detectContinuation(bodyText));
+            fallback.setColumnIndex(col);
+            articles.add(fallback);
+            existingTitleKeys.add(qtKey);
+            log.info("[QUOTE-SUPPLEMENT] added title={} bodyLen={}", qtTitle, bodyText.length());
+        }
+
+        articles.sort(Comparator.comparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[0]));
+        return articles;
+    }
+
+    private String normTitleKey(String text) {
+        if (text == null) return "";
+        return text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\uac00-\\ud7a3]+", "");
+    }
+
+    private List<PdfArticle> promoteUpperHeadlineForSubheadingTitles(
+            List<PdfArticle> articles,
+            List<Line> titleCandidates,
+            double bodyMedian,
+            double pageWidth
+    ) {
+        if (articles == null || articles.isEmpty() || titleCandidates == null || titleCandidates.isEmpty()) {
+            return articles;
+        }
+
+        Map<String, Line> titleLineMap = new HashMap<>();
+        for (Line line : titleCandidates) {
+            String key = normTitleKey(line.getText());
+            if (!key.isEmpty() && !titleLineMap.containsKey(key)) {
+                titleLineMap.put(key, line);
+            }
+        }
+
+        Set<String> existingTitleKeys = articles.stream()
+                .map(PdfArticle::getTitle)
+                .filter(Objects::nonNull)
+                .map(this::normTitleKey)
+                .collect(Collectors.toSet());
+
+        for (PdfArticle article : articles) {
+            String title = article.getTitle();
+            if (title == null || title.isBlank()) continue;
+
+            String key = normTitleKey(title);
+            Line subheading = titleLineMap.get(key);
+            if (subheading == null) continue;
+
+            Line upperHeadline = titleCandidates.stream()
+                    .filter(l -> l != subheading)
+                    .filter(l -> l.getY0() < subheading.getY0())
+                    .filter(l -> Math.abs(l.getX0() - subheading.getX0()) <= pageWidth * 0.06)
+                    .filter(l -> {
+                        double gap = subheading.getY0() - l.getY1();
+                        return gap >= -bodyMedian * 0.2 && gap <= bodyMedian * 6.0;
+                    })
+                    .filter(l -> l.getMaxSize() >= bodyMedian * 1.8)
+                    .filter(l -> l.getWidth() >= subheading.getWidth() * 1.4)
+                    .max(Comparator.comparingDouble(Line::getMaxSize))
+                    .orElse(null);
+
+            if (upperHeadline == null) continue;
+
+            String upperKey = normTitleKey(upperHeadline.getText());
+            if (upperKey.isEmpty()) continue;
+            if (existingTitleKeys.contains(upperKey)) continue;
+
+            String mergedTitle = ((upperHeadline.getText() == null ? "" : upperHeadline.getText().trim())
+                    + "\n" + title.trim()).trim();
+            article.setTitle(mergedTitle);
+            existingTitleKeys.add(normTitleKey(mergedTitle));
+        }
+        return articles;
+    }
+
+    private List<Line> collapseSubtitleTitles(List<Line> sortedTitles, double bodyMedian, double pageWidth) {
+        if (sortedTitles == null || sortedTitles.size() < 2) {
+            return sortedTitles == null ? Collections.emptyList() : sortedTitles;
+        }
+        List<Line> collapsed = new ArrayList<>();
+        int i = 0;
+        while (i < sortedTitles.size()) {
+            Line current = sortedTitles.get(i);
+            if (i + 1 < sortedTitles.size()) {
+                Line next = sortedTitles.get(i + 1);
+                if (isLikelySubtitlePair(current, next, bodyMedian, pageWidth)) {
+                    String mergedText = ((current.getText() == null ? "" : current.getText().trim()) + "\n"
+                            + (next.getText() == null ? "" : next.getText().trim())).trim();
+                    double[] cb = current.getBbox();
+                    double[] nb = next.getBbox();
+                    double[] mergedBbox = new double[] {
+                            Math.min(cb[0], nb[0]),
+                            Math.min(cb[1], nb[1]),
+                            Math.max(cb[2], nb[2]),
+                            Math.max(cb[3], nb[3])
+                    };
+                    collapsed.add(new Line(
+                            mergedText,
+                            mergedBbox,
+                            Math.max(current.getMaxSize(), next.getMaxSize()),
+                            current.isBold() || next.isBold()
+                    ));
+                    i += 2;
+                    continue;
+                }
+            }
+            collapsed.add(current);
+            i++;
+        }
+        return collapsed;
+    }
+
+    private boolean isLikelySubtitlePair(Line title, Line subtitle, double bodyMedian, double pageWidth) {
+        if (title == null || subtitle == null) return false;
+        String t1 = title.getText() == null ? "" : title.getText().trim();
+        String t2 = subtitle.getText() == null ? "" : subtitle.getText().trim();
+        if (t1.isEmpty() || t2.isEmpty()) return false;
+
+        double gap = subtitle.getY0() - title.getY1();
+        boolean closeVertically = gap >= -bodyMedian * 0.3 && gap <= bodyMedian * 2.0;
+        boolean closeInX = Math.abs(subtitle.getX0() - title.getX0()) <= pageWidth * 0.06;
+        boolean headlineStrong = title.getMaxSize() >= bodyMedian * 1.8;
+        boolean subtitleSized = subtitle.getMaxSize() >= bodyMedian * 1.05
+                && subtitle.getMaxSize() <= title.getMaxSize() * 0.80;
+        boolean subtitleNarrower = subtitle.getWidth() <= title.getWidth() * 0.95;
+
+        return closeVertically && closeInX && headlineStrong && subtitleSized && subtitleNarrower;
     }
 
     private boolean isArticleExpandedToRight(PdfArticle article, List<Double> pageSplits, double pageWidth) {
@@ -380,15 +624,32 @@ public class PdfExtractorEngine {
 
             for (int pi = 0; pi < document.getNumberOfPages(); pi++) {
                 List<PdfArticle> pageArticles = buildArticlesForPage(document, pi);
-                int idx = 1;
                 for (PdfArticle a : pageArticles) {
                     a.setPage(pi + 1);
-                    a.setId(String.format("p%02d_a%03d", pi + 1, idx++));
                     allArticles.add(a);
                 }
             }
+            allArticles = PdfArticleDeduplicator.removeDuplicateArticles(allArticles);
+            assignStableArticleIds(allArticles);
 
             return new ProcessResult(allArticles);
+        }
+    }
+
+    private void assignStableArticleIds(List<PdfArticle> allArticles) {
+        if (allArticles == null || allArticles.isEmpty()) return;
+        allArticles.sort(Comparator
+                .comparingInt(PdfArticle::getPage)
+                .thenComparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[0]));
+
+        Map<Integer, Integer> pageCounters = new HashMap<>();
+        for (PdfArticle a : allArticles) {
+            int page = a.getPage();
+            int seq = pageCounters.getOrDefault(page, 0) + 1;
+            pageCounters.put(page, seq);
+            a.setId(String.format("p%02d_a%03d", page, seq));
         }
     }
 

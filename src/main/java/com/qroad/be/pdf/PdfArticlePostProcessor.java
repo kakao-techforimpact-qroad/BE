@@ -1,6 +1,14 @@
 package com.qroad.be.pdf;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -10,11 +18,15 @@ final class PdfArticlePostProcessor {
     private PdfArticlePostProcessor() {
     }
 
-    private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
+    private static final Pattern CONTINUATION_PATTERN = Pattern.compile(
+            "(?:[▶>\\]])?\\s*기사\\s*(\\d+)\\s*면\\s*이어짐"
+    );
+    private static final Pattern FRONT_CONTINUATION_PATTERN = Pattern.compile(
+            "(?:[▷>])\\s*1면\\s*[‘'\"“]?([^’'\"”]{2,80})[’'\"”]?\\s*이어짐\\s*기사"
+    );
 
     /**
-     * 각 본문 라인이 단 하나의 기사에만 귀속되도록 재할당합니다.
-     * 컬럼/거리 점수를 사용해 소유권을 정하고, 기사 본문 텍스트를 다시 구성합니다.
+     * 각 본문 라인이 하나의 기사에만 귀속되도록 재할당합니다.
      */
     static List<PdfArticle> enforceUniqueBodyLineOwnership(
             List<PdfArticle> articles,
@@ -91,6 +103,7 @@ final class PdfArticlePostProcessor {
      * "기사 N면 이어짐" 패턴을 탐지해 이어짐 대상 페이지를 반환합니다.
      */
     static Integer detectContinuation(String text) {
+        if (text == null || text.isBlank()) return null;
         Matcher m = CONTINUATION_PATTERN.matcher(text);
         if (m.find()) return Integer.parseInt(m.group(1));
         return null;
@@ -98,7 +111,6 @@ final class PdfArticlePostProcessor {
 
     /**
      * 같은 컬럼에서 기자줄이 없는 조각 기사를 다음 조각과 병합합니다.
-     * 기자줄이 나타날 때까지 누적해 단편 분리 오류를 완화합니다.
      */
     static List<PdfArticle> mergeFragmentsUntilReporter(List<PdfArticle> sortedArticles) {
         if (sortedArticles == null || sortedArticles.size() <= 1) return sortedArticles;
@@ -146,10 +158,167 @@ final class PdfArticlePostProcessor {
             combined.setReporter(reporter);
             combined.setEmail(email);
             combined.setContinuationToPage(current.getContinuationToPage());
+            combined.setPage(current.getPage());
             merged.add(combined);
             i = j;
         }
         return merged;
+    }
+
+    /**
+     * 1면 기사 + 내지 "▷ 1면 … 이어짐 기사" 조각을 병합합니다.
+     */
+    static List<PdfArticle> mergeFrontPageContinuations(List<PdfArticle> articles) {
+        if (articles == null || articles.size() <= 1) return articles;
+
+        List<PdfArticle> sorted = new ArrayList<>(articles);
+        sorted.sort(Comparator
+                .comparingInt(PdfArticle::getPage)
+                .thenComparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[0]));
+
+        List<PdfArticle> fronts = sorted.stream()
+                .filter(a -> a.getPage() == 1 && a.getContinuationToPage() != null)
+                .collect(Collectors.toList());
+        if (fronts.isEmpty()) return sorted;
+
+        Set<PdfArticle> consumed = new HashSet<>();
+        List<PdfArticle> out = new ArrayList<>();
+
+        for (PdfArticle article : sorted) {
+            if (consumed.contains(article)) continue;
+
+            String anchor = extractFrontAnchor(article.getText());
+            if (anchor == null) {
+                out.add(article);
+                continue;
+            }
+
+            PdfArticle match = findBestFrontMatch(fronts, article.getPage(), anchor, article.getTitle());
+            if (match == null || consumed.contains(match)) {
+                out.add(article);
+                continue;
+            }
+
+            PdfArticle merged = new PdfArticle();
+            merged.setTitle(match.getTitle());
+            merged.setReporter(nonBlank(match.getReporter()) ? match.getReporter() : article.getReporter());
+            merged.setEmail(nonBlank(match.getEmail()) ? match.getEmail() : article.getEmail());
+            merged.setTitleBbox(match.getTitleBbox());
+            merged.setBodyBbox(unionBbox(match.getBodyBbox(), article.getBodyBbox()));
+            merged.setText(joinText(match.getText(), stripFrontContinuationLead(article.getText())));
+            merged.setContinuationToPage(null);
+            merged.setColumnIndex(match.getColumnIndex());
+            merged.setPage(match.getPage());
+
+            consumed.add(match);
+            consumed.add(article);
+            out.add(merged);
+        }
+
+        for (PdfArticle front : fronts) {
+            if (!consumed.contains(front)) out.add(front);
+        }
+
+        out.sort(Comparator
+                .comparingInt(PdfArticle::getPage)
+                .thenComparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[0]));
+        return out;
+    }
+
+    private static PdfArticle findBestFrontMatch(
+            List<PdfArticle> fronts,
+            int continuationPage,
+            String anchor,
+            String continuationTitle
+    ) {
+        String anchorKey = normKey(anchor);
+        String contTitleKey = normKey(continuationTitle);
+        PdfArticle best = null;
+        double bestScore = 0.0;
+
+        for (PdfArticle front : fronts) {
+            if (front.getContinuationToPage() == null || front.getContinuationToPage() != continuationPage) continue;
+            String frontTitleKey = normKey(front.getTitle());
+            double score = titleSimilarity(anchorKey, frontTitleKey);
+            score = Math.max(score, titleSimilarity(contTitleKey, frontTitleKey));
+            if (score > bestScore) {
+                bestScore = score;
+                best = front;
+            }
+        }
+        return bestScore >= 0.45 ? best : null;
+    }
+
+    private static String extractFrontAnchor(String text) {
+        if (text == null || text.isBlank()) return null;
+        Matcher m = FRONT_CONTINUATION_PATTERN.matcher(text);
+        if (m.find()) return m.group(1);
+        return null;
+    }
+
+    private static String stripFrontContinuationLead(String text) {
+        if (text == null || text.isBlank()) return "";
+        Matcher m = FRONT_CONTINUATION_PATTERN.matcher(text);
+        if (!m.find()) return text.trim();
+        return text.substring(m.end()).trim();
+    }
+
+    private static String joinText(String a, String b) {
+        String left = a == null ? "" : a.trim();
+        String right = b == null ? "" : b.trim();
+        if (left.isEmpty()) return right;
+        if (right.isEmpty()) return left;
+        return left + "\n" + right;
+    }
+
+    private static String normKey(String s) {
+        if (s == null) return "";
+        return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\uac00-\\ud7a3]+", "");
+    }
+
+    private static double titleSimilarity(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) return 0.0;
+        if (a.equals(b)) return 1.0;
+        if (a.contains(b) || b.contains(a)) {
+            int min = Math.min(a.length(), b.length());
+            int max = Math.max(a.length(), b.length());
+            return (double) min / Math.max(1, max);
+        }
+        Set<String> gramsA = toBigrams(a);
+        Set<String> gramsB = toBigrams(b);
+        if (gramsA.isEmpty() || gramsB.isEmpty()) return 0.0;
+        int inter = 0;
+        for (String g : gramsA) if (gramsB.contains(g)) inter++;
+        int union = gramsA.size() + gramsB.size() - inter;
+        return union == 0 ? 0.0 : (double) inter / union;
+    }
+
+    private static Set<String> toBigrams(String s) {
+        Set<String> out = new HashSet<>();
+        if (s == null || s.length() < 2) return out;
+        for (int i = 0; i < s.length() - 1; i++) {
+            out.add(s.substring(i, i + 2));
+        }
+        return out;
+    }
+
+    private static boolean nonBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    private static double[] unionBbox(double[] a, double[] b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return new double[]{
+                Math.min(a[0], b[0]),
+                Math.min(a[1], b[1]),
+                Math.max(a[2], b[2]),
+                Math.max(a[3], b[3])
+        };
     }
 
     private static boolean isArticleExpandedToRight(PdfArticle article, List<Double> pageSplits, double pageWidth) {
@@ -170,3 +339,4 @@ final class PdfArticlePostProcessor {
         return false;
     }
 }
+

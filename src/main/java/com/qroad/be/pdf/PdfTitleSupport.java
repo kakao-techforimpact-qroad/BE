@@ -9,14 +9,14 @@ final class PdfTitleSupport {
     private PdfTitleSupport() {
     }
 
-    private static final List<String> BAD_KEYWORDS = List.of("발행", "면", "호", "www", "http", "기자", "전화", "팩스");
+    private static final List<String> BAD_KEYWORDS = List.of("발행", "면", "www", "http", "기자", "전화", "팩스");
     private static final Pattern PAGE_HEADER_PATTERN = Pattern.compile("^\\d+\\s+\\S{1,3}$|^\\S{1,3}\\s+\\d+$");
     private static final Pattern REPORTER_EMAIL_PATTERN = Pattern.compile("([\\uAC00-\\uD7A3]{2,4})\\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+)");
-    private static final Pattern SUBHEADING_MARKER_PATTERN = Pattern.compile("^[■◆▶▷·●\\-].*");
-    private static final double TITLE_RATIO_THRESHOLD_NON_BOLD = 1.24;
-    private static final double TITLE_RATIO_THRESHOLD_BOLD = 1.12;
-    private static final double TITLE_ABS_THRESHOLD_NON_BOLD = 11.0;
-    private static final double TITLE_ABS_THRESHOLD_BOLD = 10.3;
+    private static final Pattern SUBHEADING_MARKER_PATTERN = Pattern.compile("^[■◆▶▷△▲\\-•].*");
+    private static final double TITLE_RATIO_THRESHOLD_NON_BOLD = 1.18;
+    private static final double TITLE_RATIO_THRESHOLD_BOLD = 1.10;
+    private static final double TITLE_ABS_THRESHOLD_NON_BOLD = 10.6;
+    private static final double TITLE_ABS_THRESHOLD_BOLD = 10.0;
     private static final double STRONG_HEADLINE_RATIO = 1.58;
     private static final double STRONG_HEADLINE_MIN_WIDTH_RATIO = 0.34;
 
@@ -149,7 +149,14 @@ final class PdfTitleSupport {
                 double sizeRatio = Math.min(anchor.getMaxSize(), next.getMaxSize()) / Math.max(anchor.getMaxSize(), next.getMaxSize());
                 boolean closeInX = leftDelta <= pageWidth * 0.045;
                 boolean similarSize = sizeRatio >= 0.80;
-                if (!(overlap >= 0.50 || closeInX) || !similarSize) continue;
+                boolean stackedSubtitleUnderStrongHeadline =
+                        (overlap >= 0.45 || closeInX)
+                                && gap <= bodyMedian * 1.6
+                                && anchor.getMaxSize() >= bodyMedian * 1.8
+                                && next.getMaxSize() >= bodyMedian * 1.08
+                                && next.getMaxSize() <= anchor.getMaxSize() * 0.78
+                                && next.getWidth() <= anchor.getWidth() * 0.95;
+                if (!(overlap >= 0.50 || closeInX) || !(similarSize || stackedSubtitleUnderStrongHeadline)) continue;
                 used[j] = true;
                 String nextText = next.getText() == null ? "" : next.getText().trim();
                 if (!nextText.isEmpty()) {
@@ -209,9 +216,10 @@ final class PdfTitleSupport {
     private static boolean isLikelyEmbeddedSubheading(Line candidate, List<Line> lines, double bodyMedian, double pageWidth) {
         if (isStrongHeadlineShape(candidate, bodyMedian, pageWidth)) return false;
         if (isLikelyTopIndependentArticleTitle(candidate, lines, bodyMedian, pageWidth)) return false;
+        if (isLikelyQuotedHeadline(candidate, bodyMedian, pageWidth)) return false;
         double size = candidate.getMaxSize();
-        boolean onlySlightlyBigger = size < bodyMedian * 1.28;
-        boolean narrowWidth = candidate.getWidth() < pageWidth * 0.36;
+        boolean onlySlightlyBigger = size < bodyMedian * 1.22;
+        boolean narrowWidth = candidate.getWidth() < pageWidth * 0.30;
         Line nearestAbove = null, nearestBelow = null;
         for (Line line : lines) {
             if (line == candidate) continue;
@@ -225,8 +233,22 @@ final class PdfTitleSupport {
         if (nearestAbove == null || nearestBelow == null) return false;
         double topGap = candidate.getY0() - nearestAbove.getY1();
         double bottomGap = nearestBelow.getY0() - candidate.getY1();
-        boolean tightlyEmbedded = topGap >= 0 && bottomGap >= 0 && topGap < bodyMedian * 0.95 && bottomGap < bodyMedian * 1.15;
+        boolean tightlyEmbedded = topGap >= 0 && bottomGap >= 0 && topGap < bodyMedian * 0.80 && bottomGap < bodyMedian * 0.95;
         return onlySlightlyBigger && narrowWidth && tightlyEmbedded;
+    }
+
+    private static boolean isLikelyQuotedHeadline(Line candidate, double bodyMedian, double pageWidth) {
+        if (candidate == null) return false;
+        String t = candidate.getText() == null ? "" : candidate.getText().trim();
+        if (t.length() < 8 || t.length() > 90) return false;
+        boolean hasQuoteLike = t.startsWith("\"") || t.startsWith("'")
+                || t.startsWith("\u201C") || t.startsWith("\u2018")
+                || t.contains("\u201D") || t.contains("\u2019")
+                || t.contains("\"");
+        if (!hasQuoteLike) return false;
+        boolean sizeEnough = candidate.getMaxSize() >= bodyMedian * 1.14;
+        boolean widthEnough = candidate.getWidth() >= pageWidth * 0.20;
+        return sizeEnough && widthEnough;
     }
 
     
@@ -259,7 +281,7 @@ final class PdfTitleSupport {
                 .filter(l -> l.getMaxSize() <= bodyMedian * 1.18)
                 .count();
 
-        return belowBodyLikeLines >= 4;
+        return belowBodyLikeLines >= 2;
     }
 
     private static double overlapRatioByRange(double a0, double a1, double b0, double b1) {
@@ -359,3 +381,4 @@ final class PdfTitleSupport {
         return false;
     }
 }
+

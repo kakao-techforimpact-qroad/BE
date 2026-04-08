@@ -25,15 +25,19 @@ final class PdfArticleDeduplicator {
             for (PdfArticle existing : kept) {
                 boolean sameTitle = normalizeForCompare(candidate.getTitle())
                         .equals(normalizeForCompare(existing.getTitle()));
+                boolean samePage = candidate.getPage() == existing.getPage();
                 boolean overlapHigh = bboxOverlapRatio(candidate.getBodyBbox(), existing.getBodyBbox()) >= 0.50;
                 boolean containHigh = isHighContainment(
                         normalizeForCompare(candidate.getText()),
                         normalizeForCompare(existing.getText()));
                 boolean sameColumn = candidate.getColumnIndex() == existing.getColumnIndex();
-                double titleYDistance = Math.abs(candidate.getTitleBbox()[1] - existing.getTitleBbox()[1]);
-                boolean sameTitleNear = sameTitle && (sameColumn || titleYDistance <= 450.0);
+                double candY = candidate.getTitleBbox() == null ? Double.MAX_VALUE : candidate.getTitleBbox()[1];
+                double existY = existing.getTitleBbox() == null ? Double.MAX_VALUE : existing.getTitleBbox()[1];
+                double titleYDistance = Math.abs(candY - existY);
+                boolean sameTitleNear = sameTitle && samePage && (sameColumn || titleYDistance <= 450.0);
+                boolean sameTitleAndContain = sameTitle && containHigh;
 
-                if (sameTitleNear || (sameTitle && overlapHigh) || (sameTitle && containHigh) || (overlapHigh && containHigh)) {
+                if (sameTitleNear || (sameTitle && overlapHigh) || sameTitleAndContain) {
                     duplicate = existing;
                     break;
                 }
@@ -53,8 +57,8 @@ final class PdfArticleDeduplicator {
         }
 
         kept.sort(Comparator.comparingInt(PdfArticle::getColumnIndex)
-                .thenComparingDouble(a -> a.getTitleBbox()[1])
-                .thenComparingDouble(a -> a.getTitleBbox()[0]));
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[1])
+                .thenComparingDouble(a -> a.getTitleBbox() == null ? Double.MAX_VALUE : a.getTitleBbox()[0]));
         return kept;
     }
 

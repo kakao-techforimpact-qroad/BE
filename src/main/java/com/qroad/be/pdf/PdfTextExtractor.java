@@ -136,14 +136,36 @@ public class PdfTextExtractor extends PDFTextStripper {
     }
 
     private String extractSubText(String fullText, List<PosEntry> subEntries) {
-        if (subEntries.isEmpty())
-            return "";
-        // Get character range from original text
-        int minCharIdx = subEntries.stream().mapToInt(e -> e.charIdx).min().orElse(0);
-        int maxCharIdx = subEntries.stream().mapToInt(e -> e.charIdx).max().orElse(fullText.length() - 1);
-        // Extend to include the character at maxCharIdx
-        int end = Math.min(maxCharIdx + 1, fullText.length());
-        return fullText.substring(minCharIdx, end).replaceAll("\\s+", " ").trim();
+        if (subEntries.isEmpty()) return "";
+
+        // charIdx 기반 substring은 원본 writeString 순서에 영향을 받아
+        // 다단 지면에서 컬럼 텍스트가 섞일 수 있어, x축 기준으로 재조합한다.
+        List<PosEntry> ordered = new ArrayList<>(subEntries);
+        ordered.sort(Comparator.comparingDouble(e -> e.tp.getXDirAdj()));
+
+        double avgW = ordered.stream()
+                .mapToDouble(e -> e.tp.getWidthDirAdj())
+                .filter(w -> w > 0)
+                .average().orElse(5.0);
+        double gapForSpace = Math.max(1.5, avgW * 0.55);
+
+        StringBuilder sb = new StringBuilder();
+        double prevEndX = Double.NaN;
+        for (PosEntry e : ordered) {
+            TextPosition tp = e.tp;
+            String u = tp.getUnicode();
+            if (u == null || u.isBlank()) continue;
+
+            double x = tp.getXDirAdj();
+            double w = tp.getWidthDirAdj();
+            if (!Double.isNaN(prevEndX) && x - prevEndX > gapForSpace) {
+                sb.append(' ');
+            }
+            sb.append(u);
+            prevEndX = x + Math.max(0.0, w);
+        }
+
+        return sb.toString().replaceAll("\\s+", " ").trim();
     }
 
     private void addRawLine(String text, List<PosEntry> entries) {
