@@ -2,7 +2,7 @@ name: Deploy to Server
 
 on:
   push:
-    branches: [main, chore/deploy-pipeline-cleanup]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -147,6 +147,8 @@ jobs:
             export AWS_REGION='${{ secrets.AWS_REGION }}' &&
             export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' &&
             export JWT_SECRET='${{ secrets.JWT_SECRET }}' &&
+            export NEWS_LOGIN_ID='${{ secrets.NEWS_LOGIN_ID }}' &&
+            export NEWS_LOGIN_PASSWORD='${{ secrets.NEWS_LOGIN_PASSWORD }}' &&
             export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
             '${APP_DIR}/deploy.sh'
           "
