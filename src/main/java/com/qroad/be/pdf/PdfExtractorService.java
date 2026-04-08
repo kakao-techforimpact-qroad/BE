@@ -90,8 +90,8 @@ public class PdfExtractorService {
     private static final double STRONG_HEADLINE_MIN_WIDTH_RATIO = 0.34;
     private static final Pattern SUBHEADING_MARKER_PATTERN = Pattern.compile("^[■◆▲●◇□▪ㆍ·].*");
     // 안정화 모드: 과분리/과합침을 유발할 수 있는 실험적 보정은 기본 OFF
-    private static final boolean ENABLE_SINGLE_COLUMN_SPLIT_PATCH = false;
-    private static final boolean ENABLE_SUBCOLUMN_BODY_FILTER = false;
+    private static final boolean ENABLE_SINGLE_COLUMN_SPLIT_PATCH = true;
+    private static final boolean ENABLE_SUBCOLUMN_BODY_FILTER = true;
     private static final boolean ENABLE_INTERNAL_HEADLINE_SPLIT = true;
 
     // ──────────────────────── public entry point ────────────────────────
@@ -1123,9 +1123,13 @@ public class PdfExtractorService {
                 continue;
             }
 
+            int lineCol = assignCol(line.getX0(), pageSplits);
             List<PdfArticle> candidates = new ArrayList<>();
             for (PdfArticle article : articles) {
                 if (article.getBodyBbox() == null || article.getTitleBbox() == null) {
+                    continue;
+                }
+                if (!isAllowedColumnForArticleLine(article, lineCol, pageSplits, pageWidth)) {
                     continue;
                 }
                 if (!isInsideBboxCenter(line, article.getBodyBbox())) {
@@ -1148,7 +1152,6 @@ public class PdfExtractorService {
 
             PdfArticle best = null;
             double bestScore = Double.MAX_VALUE;
-            int lineCol = assignCol(line.getX0(), pageSplits);
             double lineCy = (line.getBbox()[1] + line.getBbox()[3]) / 2.0;
 
             for (PdfArticle article : candidates) {
@@ -1172,6 +1175,18 @@ public class PdfExtractorService {
             List<Line> lines = owned.getOrDefault(article, List.of());
             if (lines.size() < 3) {
                 continue;
+            }
+            double[] articleBodyBbox = article.getBodyBbox();
+            double[] articleTitleBbox = article.getTitleBbox();
+            if (articleBodyBbox != null && articleTitleBbox != null) {
+                boolean allowRightAdjacent = isArticleExpandedToRight(article, pageSplits, pageWidth);
+                lines = filterBodyLinesByAnchorSubColumn(
+                        lines,
+                        articleBodyBbox[0],
+                        articleBodyBbox[2],
+                        articleTitleBbox[0],
+                        allowRightAdjacent
+                );
             }
             List<Line> ordered = sortLinesReadingOrder(lines, pageWidth);
             String rebuilt = ordered.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
@@ -1437,6 +1452,47 @@ public class PdfExtractorService {
         articles = removeDuplicateArticles(articles);
 
         return articles;
+    }
+
+    private boolean isArticleExpandedToRight(PdfArticle article, List<Double> pageSplits, double pageWidth) {
+        if (article == null || article.getBodyBbox() == null) {
+            return false;
+        }
+        int col = article.getColumnIndex();
+        if (col < 0 || col >= pageSplits.size()) {
+            return false;
+        }
+        double boundaryX = pageSplits.get(col);
+        double expansionThreshold = pageWidth * 0.02;
+        return article.getBodyBbox()[2] >= boundaryX + expansionThreshold;
+    }
+
+    private boolean isAllowedColumnForArticleLine(
+            PdfArticle article,
+            int lineCol,
+            List<Double> pageSplits,
+            double pageWidth
+    ) {
+        int articleCol = article.getColumnIndex();
+        if (lineCol == articleCol) {
+            return true;
+        }
+
+        // 기본값: 다른 컬럼 라인은 제외
+        // 예외: 왼쪽 제목 기사의 본문 bbox가 오른쪽 인접 컬럼까지 확장된 경우만 허용
+        if (lineCol != articleCol + 1) {
+            return false;
+        }
+        if (articleCol < 0 || articleCol >= pageSplits.size()) {
+            return false;
+        }
+        double[] bb = article.getBodyBbox();
+        if (bb == null || bb.length < 4) {
+            return false;
+        }
+        double boundaryX = pageSplits.get(articleCol);
+        double expansionThreshold = pageWidth * 0.02;
+        return bb[2] >= boundaryX + expansionThreshold;
     }
 
     /**
