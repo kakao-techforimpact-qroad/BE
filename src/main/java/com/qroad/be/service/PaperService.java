@@ -30,6 +30,7 @@ import java.time.YearMonth;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 
@@ -38,6 +39,13 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class PaperService {
+
+        private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
+                        "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0", "\uc54c\ub9bd\ub2c8\ub2e4", "\uc8fc\ubbfc\uac8c\uc2dc\ud310");
+        private static final List<Pattern> NON_ARTICLE_TITLE_PATTERNS = List.of(
+                        Pattern.compile("(?i)\\uc0ac\\s*\\uace0\\s*\\(\\s*\\u793e\\s*\\u544a\\s*\\)"),
+                        Pattern.compile("(?i)^\\s*\\uc54c\\ub9bd\\ub2c8\ub2e4\\s*$"),
+                        Pattern.compile("(?i)^\\s*\\uc8fc\\ubbfc\\s*\\uac8c\\uc2dc\\ud310\\s*$"));
 
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
@@ -322,6 +330,10 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
                         for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                                if (isNonArticleTitle(chunk.getTitle(), chunk.getSummary())) {
+                                        log.info("Skip non-article notice by title: {}", chunk.getTitle());
+                                        continue;
+                                }
                                 // 移댄뀒怨좊━ 湲곗궗 AI ?대?吏瑜?留ㅽ븨
                                 String imagePath = getCategoryImage(chunk.getCategory());
 
@@ -642,6 +654,28 @@ public class PaperService {
         /**
          * LLM??遺꾨쪟??移댄뀒怨좊━??留욌뒗 誘몃━ 留뚮뱾?댁쭊 AI ?대?吏 寃쎈줈(S3 Key)瑜?諛섑솚?⑸땲??
          */
+        private boolean isNonArticleTitle(String title, String summary) {
+                String rawTitle = title == null ? "" : title;
+                String rawSummary = summary == null ? "" : summary;
+                String mergedRaw = (rawTitle + " " + rawSummary).trim();
+                String normalized = normalizeForMatch(mergedRaw);
+
+                boolean byKeyword = NON_ARTICLE_TITLE_KEYWORDS.stream()
+                                .map(this::normalizeForMatch)
+                                .anyMatch(normalized::contains);
+                if (byKeyword) {
+                        return true;
+                }
+                return NON_ARTICLE_TITLE_PATTERNS.stream().anyMatch(p -> p.matcher(mergedRaw).find());
+        }
+
+        private String normalizeForMatch(String text) {
+                if (text == null) {
+                        return "";
+                }
+                return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        }
+
         private String getCategoryImage(String category) {
                 if (category == null)
                         return "ai-images/placeholder.png";
