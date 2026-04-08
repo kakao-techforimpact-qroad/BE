@@ -57,6 +57,12 @@ public class PdfExtractorService {
     private static final Pattern REPORTER_EMAIL_PATTERN = Pattern.compile(
             "([\\uAC00-\\uD7A3]{2,4})\\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+)"
     );
+    private static final Pattern REPORTER_EMAIL_FLEX_PATTERN = Pattern.compile(
+            "([\\uAC00-\\uD7A3]{2,4}).{0,6}?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+)"
+    );
+    private static final Pattern REPORTER_NAME_ONLY_PATTERN = Pattern.compile(
+            "^\\s*(?:/\\s*)?([\\uAC00-\\uD7A3]{2,4})\\s*\\uAE30\\uC790\\s*$"
+    );
 
     // 광고 판별 패턴
     // 전화번호: 02-1234-5678 / 010-1234-5678 / (02)1234-5678 형태
@@ -1444,12 +1450,16 @@ public class PdfExtractorService {
 
         // 페이지 라인에서 기자 줄을 보정하여 기사 끝 신호 강화
         attachReporterLinesFromPage(articles, lines, splits);
+        backfillReporterFromColumnWindow(articles, lines, splits);
         // 최종 reporter/email 메타데이터 채움
         for (PdfArticle article : articles) {
             fillReporterAndEmail(article);
         }
 
         articles = removeDuplicateArticles(articles);
+        for (PdfArticle article : articles) {
+            fillReporterAndEmail(article);
+        }
 
         return articles;
     }
@@ -1555,32 +1565,46 @@ public class PdfExtractorService {
             if (t == null || t.isBlank()) {
                 continue;
             }
-            if (!REPORTER_EMAIL_PATTERN.matcher(t).find()) {
+            if (!isReporterLineCandidate(t)) {
                 continue;
             }
-
-            int lineCol = assignCol(line.getX0(), splits);
             double lineY = line.getY0();
             PdfArticle best = null;
             double bestDistance = Double.MAX_VALUE;
 
             for (PdfArticle article : articles) {
-                if (article.getColumnIndex() != lineCol) {
-                    continue;
-                }
+                if (article.getBodyBbox() == null || article.getTitleBbox() == null) continue;
                 if (article.getTitleBbox()[1] > lineY) {
                     continue;
                 }
 
-                double distance = Math.abs(lineY - article.getBodyBbox()[3]);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
+                double[] bb = article.getBodyBbox();
+                double distance = Math.abs(lineY - bb[3]);
+                boolean sameCol = assignCol(line.getX0(), splits) == article.getColumnIndex();
+                boolean inArticleX = line.getX0() >= bb[0] - 8 && line.getX0() <= bb[2] + 8;
+                double colPenalty = sameCol ? 0.0 : (inArticleX ? 45.0 : 120.0);
+                double score = distance + colPenalty;
+                if (score < bestDistance) {
+                    bestDistance = score;
                     best = article;
                 }
             }
 
-            if (best == null || bestDistance > 140) {
+            if (best == null || bestDistance > 320) {
                 continue;
+            }
+
+            String extractedReporter = extractReporterNameFromLine(t);
+            String extractedEmail = extractReporterEmailFromLine(t);
+            if (best.getReporter() == null || best.getReporter().isBlank()) {
+                if (extractedReporter != null && !extractedReporter.isBlank()) {
+                    best.setReporter(extractedReporter);
+                }
+            }
+            if (best.getEmail() == null || best.getEmail().isBlank()) {
+                if (extractedEmail != null && !extractedEmail.isBlank()) {
+                    best.setEmail(extractedEmail);
+                }
             }
 
             String body = best.getText() == null ? "" : best.getText();
@@ -1599,7 +1623,8 @@ public class PdfExtractorService {
     }
 
     private boolean containsReporterEmail(String text) {
-        return text != null && REPORTER_EMAIL_PATTERN.matcher(text).find();
+        return text != null
+                && (REPORTER_EMAIL_PATTERN.matcher(text).find() || REPORTER_EMAIL_FLEX_PATTERN.matcher(text).find());
     }
 
     private void fillReporterAndEmail(PdfArticle article) {
@@ -1614,14 +1639,128 @@ public class PdfExtractorService {
             lastName = matcher.group(1);
             lastEmail = matcher.group(2);
         }
+        if (lastName == null || lastEmail == null) {
+            Matcher flex = REPORTER_EMAIL_FLEX_PATTERN.matcher(article.getText());
+            while (flex.find()) {
+                lastName = flex.group(1);
+                lastEmail = flex.group(2);
+            }
+        }
 
         if (lastName != null && lastEmail != null) {
             article.setReporter(lastName);
             article.setEmail(lastEmail);
+            return;
+        }
+
+        Matcher nameOnly = REPORTER_NAME_ONLY_PATTERN.matcher(article.getText());
+        String fallbackReporter = null;
+        while (nameOnly.find()) {
+            fallbackReporter = nameOnly.group(1);
+        }
+        if (fallbackReporter != null) {
+            article.setReporter(fallbackReporter);
         }
     }
 
     // ──────────────────────── internal process ────────────────────────
+
+    private void backfillReporterFromColumnWindow(List<PdfArticle> articles, List<Line> lines, List<Double> splits) {
+        if (articles == null || articles.isEmpty() || lines == null || lines.isEmpty()) {
+            return;
+        }
+
+        double pageBottom = lines.stream().mapToDouble(Line::getY1).max().orElse(10_000.0);
+        Map<Integer, List<PdfArticle>> byCol = articles.stream()
+                .collect(Collectors.groupingBy(PdfArticle::getColumnIndex));
+
+        for (Map.Entry<Integer, List<PdfArticle>> entry : byCol.entrySet()) {
+            int col = entry.getKey();
+            List<PdfArticle> colArticles = entry.getValue();
+            colArticles.sort(Comparator.comparingDouble(a -> a.getTitleBbox()[1]));
+
+            for (int i = 0; i < colArticles.size(); i++) {
+                PdfArticle article = colArticles.get(i);
+                if (article.getReporter() != null && !article.getReporter().isBlank()) {
+                    continue;
+                }
+
+                double yMin = article.getTitleBbox()[1];
+                double yMax = (i + 1 < colArticles.size())
+                        ? colArticles.get(i + 1).getTitleBbox()[1] - 2.0
+                        : pageBottom + 2.0;
+                if (yMax <= yMin) {
+                    continue;
+                }
+
+                Line best = null;
+                for (Line line : lines) {
+                    String text = line.getText();
+                    if (text == null || text.isBlank()) continue;
+                    if (!isReporterLineCandidate(text)) continue;
+                    if (assignCol(line.getX0(), splits) != col) continue;
+
+                    double ly = line.getY0();
+                    if (ly < yMin - 1.0 || ly > yMax + 1.0) continue;
+                    if (best == null || ly > best.getY0()) {
+                        best = line;
+                    }
+                }
+
+                if (best == null) {
+                    continue;
+                }
+
+                String foundReporter = extractReporterNameFromLine(best.getText());
+                String foundEmail = extractReporterEmailFromLine(best.getText());
+                if (foundReporter != null && !foundReporter.isBlank()) {
+                    article.setReporter(foundReporter);
+                }
+                if (foundEmail != null && !foundEmail.isBlank()) {
+                    article.setEmail(foundEmail);
+                }
+
+                String body = article.getText() == null ? "" : article.getText();
+                if (!body.contains(best.getText())) {
+                    article.setText((body + "\n" + best.getText()).trim());
+                }
+            }
+        }
+    }
+
+    private boolean isReporterLineCandidate(String text) {
+        if (text == null) {
+            return false;
+        }
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            return false;
+        }
+        if (REPORTER_EMAIL_PATTERN.matcher(trimmed).find() || REPORTER_EMAIL_FLEX_PATTERN.matcher(trimmed).find()) {
+            return true;
+        }
+        return trimmed.length() <= 20 && REPORTER_NAME_ONLY_PATTERN.matcher(trimmed).matches();
+    }
+
+    private String extractReporterNameFromLine(String text) {
+        if (text == null) return "";
+        Matcher strict = REPORTER_EMAIL_PATTERN.matcher(text);
+        if (strict.find()) return strict.group(1);
+        Matcher flex = REPORTER_EMAIL_FLEX_PATTERN.matcher(text);
+        if (flex.find()) return flex.group(1);
+        Matcher nameOnly = REPORTER_NAME_ONLY_PATTERN.matcher(text.trim());
+        if (nameOnly.matches()) return nameOnly.group(1);
+        return "";
+    }
+
+    private String extractReporterEmailFromLine(String text) {
+        if (text == null) return "";
+        Matcher strict = REPORTER_EMAIL_PATTERN.matcher(text);
+        if (strict.find()) return strict.group(2);
+        Matcher flex = REPORTER_EMAIL_FLEX_PATTERN.matcher(text);
+        if (flex.find()) return flex.group(2);
+        return "";
+    }
 
     private List<PdfArticle> removeDuplicateArticles(List<PdfArticle> articles) {
         if (articles == null || articles.size() < 2) {
