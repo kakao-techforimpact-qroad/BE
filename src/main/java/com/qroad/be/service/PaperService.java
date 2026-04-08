@@ -30,6 +30,7 @@ import java.time.YearMonth;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 
@@ -39,18 +40,29 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
-        // LLM이 반환하는 비기사 카테고리 정확한 명칭 (exact match)
+        // LLM? ???? ??? ????
         private static final Set<String> NON_ARTICLE_CATEGORIES = Set.of(
-                "광고·홍보", "채용·모집 공고", "입찰·행정 공고"
+                "\uad11\uace0\u00b7\ud64d\ubcf4", "\ucc44\uc6a9\u00b7\ubaa8\uc9d1 \uacf5\uace0", "\uc785\ucc30\u00b7\ud589\uc815 \uacf5\uace0"
         );
-        // LLM이 변형된 형식으로 반환할 경우 대비 키워드 폴백 (contains match)
         private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
-                "광고", "홍보", "공고", "채용", "모집", "입찰"
+                "\uad11\uace0", "\ud64d\ubcf4", "\uacf5\uace0", "\ucc44\uc6a9", "\ubaa8\uc9d1", "\uc785\ucc30"
         );
-        // 카테고리 오분류 시 제목 기반 2차 필터 (단독 단어는 오탐 가능성으로 복합어만 사용)
         private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
-                "모집공고", "직원모집", "채용공고", "구인공고"
+                "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0"
         );
+        private static final List<String> NON_ARTICLE_CONTENT_KEYWORDS = List.of(
+                "\ud31d\ub2c8\ub2e4", "\uc0bd\ub2c8\ub2e4", "\uc8fc\ud0dd\ub9e4\ub9e4", "\uc544\ud30c\ud2b8\ub9e4\ub9e4",
+                "\uc804\uc138", "\uc6d4\uc138", "\ubcf4\uc99d\uae08", "\ub9e4\ubb3c", "\ubd80\ub3d9\uc0b0", "\uc0c1\uac00\uc784\ub300",
+                "\uae09\ub9e4", "\uad6c\uc778", "\uad6c\uc9c1", "\ucc44\uc6a9\uacf5\uace0", "\ubd84\uc591", "\ubb38\uc758", "\uc0c1\ub2f4",
+                "\ud64d\ubcf4", "\uad11\uace0",
+                "\uc0c1\uc601\uc2dc\uac04\ud45c", "\uc0c1\uc601\uc2dc\uac04", "\uc0c1\uc601\uad00", "\uad00\ub78c\ub8cc",
+                "\uc601\ud654\uc2dc\uac04\ud45c", "\uacf5\uc5f0\uc2dc\uac04\ud45c"
+        );
+        private static final Pattern PHONE_NUMBER_PATTERN = Pattern.compile(
+                "(?:\\(?0\\d{1,2}\\)?[-.\\s]?\\d{3,4}[-.\\s]?\\d{4})"
+        );
+        private static final Pattern WEEKDAY_DATE_PATTERN = Pattern.compile("\\b\\d{1,2}\\s*\\(\\s*[월화수목금토일]\\s*\\)");
+        private static final Pattern TIME_PATTERN = Pattern.compile("\\b(?:[01]?\\d|2[0-3]):[0-5]\\d\\b");
 
         private final PaperRepository paperRepository;
         private final ArticleRepository articleRepository;
@@ -157,7 +169,7 @@ public class PaperService {
                 PaperEntity paper = paperRepository.findById(paperId)
                                 .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
 
-                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
+                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatusOrderByIdAsc(paperId, "ACTIVE");
                 Map<Long, List<String>> keywordsByArticleId = getKeywordsForArticles(articles);
 
                 List<ArticleDto> articleDtos = articles.stream()
@@ -314,14 +326,15 @@ public class PaperService {
                                 jobId,
                                 PublicationStep.CHUNKING_AND_ANALYZING,
                                 () -> {
+                                        List<com.qroad.be.pdf.PdfArticle> separatedArticles = extraction.getArticles();
                                         if (jobId != null) {
-                                                return llmService.chunkAndAnalyzePaper(
-                                                                content,
+                                                return llmService.analyzeSeparatedArticles(
+                                                                separatedArticles,
                                                                 (processed, total) -> publicationProgressStore
                                                                                 .updateChunkingProgress(jobId,
                                                                                                 processed, total));
                                         }
-                                        return llmService.chunkAndAnalyzePaper(content);
+                                        return llmService.analyzeSeparatedArticles(separatedArticles);
                                 });
 
                 runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
@@ -332,6 +345,7 @@ public class PaperService {
 
                 final AdminEntity finalAdmin = admin;
                 List<com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO> articleResponses = new ArrayList<>();
+                List<com.qroad.be.dto.ArticleChunkDTO> filteredChunks = new ArrayList<>();
                 final int totalChunks = articleChunks.size();
                 AtomicInteger relatedProcessed = new AtomicInteger(0);
 
@@ -344,11 +358,13 @@ public class PaperService {
                                                 || AD_CATEGORY_KEYWORDS.stream().anyMatch(category::contains);
                                 boolean isNonArticleTitle = NON_ARTICLE_TITLE_KEYWORDS.stream()
                                                 .anyMatch(title::contains);
-                                if (isAdCategory || isNonArticleTitle) {
+                                boolean isNonArticleByContent = isLikelyAdOrPromoChunk(chunk);
+                                if (isAdCategory || isNonArticleTitle || isNonArticleByContent) {
                                         log.info("비기사/광고/공고 저장 제외: title={}, category={}",
                                                 title, category);
                                         continue;
                                 }
+                                filteredChunks.add(chunk);
 
                                 // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
@@ -442,6 +458,11 @@ public class PaperService {
                                 articleResponses.add(articleResponse);
                         }
                 });
+
+                String filteredContent = buildFilteredPaperContent(filteredChunks);
+                savedPaper.setContent(filteredContent);
+                log.info("필터링 후 paper.content 갱신 완료: keepCount={}, contentLength={}",
+                                filteredChunks.size(), filteredContent.length());
 
                 runInStep(jobId, PublicationStep.FINDING_RELATED, () -> {
                         for (com.qroad.be.dto.PaperCreateResponseDTO.ArticleResponseDTO articleResponse : articleResponses) {
@@ -698,6 +719,71 @@ public class PaperService {
         /**
          * LLM이 분류한 카테고리에 맞는 미리 만들어진 AI 이미지 경로(S3 Key)를 반환합니다.
          */
+        private boolean isLikelyAdOrPromoChunk(com.qroad.be.dto.ArticleChunkDTO chunk) {
+                String title = chunk.getTitle() == null ? "" : chunk.getTitle();
+                String content = chunk.getContent() == null ? "" : chunk.getContent();
+                String summary = chunk.getSummary() == null ? "" : chunk.getSummary();
+                String merged = (title + " " + summary + " " + content).toLowerCase();
+
+                int phoneMatches = (int) PHONE_NUMBER_PATTERN.matcher(merged).results().count();
+                if (phoneMatches >= 2) {
+                        return true;
+                }
+                long keywordHits = NON_ARTICLE_CONTENT_KEYWORDS.stream().filter(merged::contains).count();
+                if (keywordHits >= 3 && phoneMatches >= 1) {
+                        return true;
+                }
+                if (isStrongTimetableBlock(merged)) {
+                        return true;
+                }
+                return keywordHits >= 5;
+        }
+
+        /**
+         * 시간/요일 1~2회 언급은 기사에서도 흔하므로 제외하지 않는다.
+         * 상영시간표처럼 반복 표 형태일 때만 강하게 제외한다.
+         */
+        private boolean isStrongTimetableBlock(String merged) {
+                int weekdayDateCount = (int) WEEKDAY_DATE_PATTERN.matcher(merged).results().count();
+                int timeCount = (int) TIME_PATTERN.matcher(merged).results().count();
+                long shortStructuredLines = Arrays.stream(merged.split("\\R"))
+                                .map(String::trim)
+                                .filter(line -> !line.isEmpty())
+                                .filter(line -> line.length() <= 40)
+                                .filter(line -> WEEKDAY_DATE_PATTERN.matcher(line).find()
+                                                || TIME_PATTERN.matcher(line).find())
+                                .count();
+                long totalLines = Arrays.stream(merged.split("\\R"))
+                                .map(String::trim)
+                                .filter(line -> !line.isEmpty())
+                                .count();
+                double structuredRatio = totalLines == 0 ? 0.0 : (double) shortStructuredLines / totalLines;
+
+                boolean conditionA = weekdayDateCount >= 4 && timeCount >= 8;
+                boolean conditionB = timeCount >= 12 && structuredRatio >= 0.6;
+                return conditionA || conditionB;
+        }
+
+        private String buildFilteredPaperContent(List<com.qroad.be.dto.ArticleChunkDTO> keptChunks) {
+                if (keptChunks == null || keptChunks.isEmpty()) {
+                        return "";
+                }
+
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < keptChunks.size(); i++) {
+                        com.qroad.be.dto.ArticleChunkDTO chunk = keptChunks.get(i);
+                        String title = chunk.getTitle() == null ? "" : chunk.getTitle().trim();
+                        String body = chunk.getContent() == null ? "" : chunk.getContent().trim();
+
+                        sb.append("=".repeat(60)).append("\n");
+                        sb.append(String.format("[기사 %d]%n", i + 1));
+                        sb.append("=".repeat(60)).append("\n");
+                        sb.append("제목: ").append(title).append("\n\n");
+                        sb.append(body).append("\n\n");
+                }
+                return sb.toString();
+        }
+
         private String getCategoryImage(String category) {
                 if (category == null)
                         return "ai-images/placeholder.png";
