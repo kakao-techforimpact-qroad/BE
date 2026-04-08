@@ -48,7 +48,12 @@ public class PaperService {
                 "\uad11\uace0", "\ud64d\ubcf4", "\uacf5\uace0", "\ucc44\uc6a9", "\ubaa8\uc9d1", "\uc785\ucc30"
         );
         private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
-                "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0"
+                "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0", "\uc54c\ub9bd\ub2c8\ub2e4", "\uc8fc\ubbfc\uac8c\uc2dc\ud310"
+        );
+        private static final List<Pattern> NON_ARTICLE_TITLE_PATTERNS = List.of(
+                Pattern.compile("(?i)\\uc0ac\\s*\\uace0\\s*\\(\\s*\\u793e\\s*\\u544a\\s*\\)"), // 사고(社告)
+                Pattern.compile("(?i)^\\s*\\uc54c\\ub9bd\\ub2c8\\ub2e4\\s*$"), // 알립니다
+                Pattern.compile("(?i)^\\s*\\uc8fc\\ubbfc\\s*\\uac8c\\uc2dc\\ud310\\s*$") // 주민게시판
         );
         private static final List<String> NON_ARTICLE_CONTENT_KEYWORDS = List.of(
                 "\ud31d\ub2c8\ub2e4", "\uc0bd\ub2c8\ub2e4", "\uc8fc\ud0dd\ub9e4\ub9e4", "\uc544\ud30c\ud2b8\ub9e4\ub9e4",
@@ -358,8 +363,7 @@ public class PaperService {
                                 String title = chunk.getTitle() != null ? chunk.getTitle() : "";
                                 boolean isAdCategory = NON_ARTICLE_CATEGORIES.contains(category)
                                                 || AD_CATEGORY_KEYWORDS.stream().anyMatch(category::contains);
-                                boolean isNonArticleTitle = NON_ARTICLE_TITLE_KEYWORDS.stream()
-                                                .anyMatch(title::contains);
+                                boolean isNonArticleTitle = isNonArticleTitle(title, chunk.getSummary());
                                 boolean isNonArticleByContent = isLikelyAdOrPromoChunk(chunk);
                                 if (isAdCategory || isNonArticleTitle || isNonArticleByContent) {
                                         log.info("비기사 광고/공고 저장 제외: title={}, category={}",
@@ -741,6 +745,26 @@ public class PaperService {
                         return true;
                 }
                 return keywordHits >= 5;
+        }
+
+        private boolean isNonArticleTitle(String title, String summary) {
+                String rawTitle = title == null ? "" : title;
+                String rawSummary = summary == null ? "" : summary;
+                String mergedRaw = (rawTitle + " " + rawSummary).trim();
+                String normalized = normalizeForMatch(mergedRaw);
+
+                boolean byKeyword = NON_ARTICLE_TITLE_KEYWORDS.stream()
+                                .map(this::normalizeForMatch)
+                                .anyMatch(normalized::contains);
+                if (byKeyword) {
+                        return true;
+                }
+                return NON_ARTICLE_TITLE_PATTERNS.stream().anyMatch(p -> p.matcher(mergedRaw).find());
+        }
+
+        private String normalizeForMatch(String text) {
+                if (text == null) return "";
+                return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
         }
 
         /**

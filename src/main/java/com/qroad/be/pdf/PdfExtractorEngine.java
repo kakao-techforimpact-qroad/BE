@@ -156,6 +156,8 @@ public class PdfExtractorEngine {
         titles = PdfTitleSupport.filterMainTitleCandidates(titles, lines, bodyMedian, pageWidth);
         titles = PdfTitleSupport.augmentMissingUpperHeadlinePerColumn(titles, lines, bodyMedian, pageWidth, pageHeight);
         titles = PdfTitleSupport.mergeStackedTitleCandidates(titles, bodyMedian, pageWidth);
+        titles = suppressSubtitleOnlyTitleCandidates(titles, bodyMedian, pageWidth);
+        titles = dropBodyLikeOverlongTitleCandidates(titles, bodyMedian, pageWidth);
         if (titles.isEmpty()) {
             return Collections.emptyList();
         }
@@ -227,6 +229,17 @@ public class PdfExtractorEngine {
                 int forcedSplitIdx = -1;
                 if (reporterIdx >= 0 && reporterIdx < ordered.size() - 6) {
                     forcedSplitIdx = PdfTitleSupport.findFirstStrongTitleInTail(ordered, reporterIdx + 1, bodyMedian, pageWidth);
+                    if (forcedSplitIdx >= 0 && forcedSplitIdx < ordered.size()) {
+                        Line forcedSplitTitle = ordered.get(forcedSplitIdx);
+                        String forcedText = forcedSplitTitle.getText() == null ? "" : forcedSplitTitle.getText().trim();
+                        boolean looksValidTitle = PdfTitleSupport.isProbableTitle(forcedSplitTitle, bodyMedian)
+                                && forcedText.length() >= 8
+                                && forcedText.length() <= 90
+                                && !forcedText.contains("@");
+                        if (!looksValidTitle) {
+                            forcedSplitIdx = -1;
+                        }
+                    }
                 }
                 String text = ordered.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
                 if (text.length() < 50) {
@@ -569,14 +582,105 @@ public class PdfExtractorEngine {
         if (t1.isEmpty() || t2.isEmpty()) return false;
 
         double gap = subtitle.getY0() - title.getY1();
-        boolean closeVertically = gap >= -bodyMedian * 0.3 && gap <= bodyMedian * 2.0;
+        boolean closeVertically = gap >= -bodyMedian * 0.4 && gap <= bodyMedian * 2.8;
         boolean closeInX = Math.abs(subtitle.getX0() - title.getX0()) <= pageWidth * 0.06;
-        boolean headlineStrong = title.getMaxSize() >= bodyMedian * 1.8;
+        boolean headlineStrong = title.getMaxSize() >= bodyMedian * 1.45;
         boolean subtitleSized = subtitle.getMaxSize() >= bodyMedian * 1.05
-                && subtitle.getMaxSize() <= title.getMaxSize() * 0.80;
-        boolean subtitleNarrower = subtitle.getWidth() <= title.getWidth() * 0.95;
+                && subtitle.getMaxSize() <= title.getMaxSize() * 0.86;
+        boolean subtitleNarrower = subtitle.getWidth() <= title.getWidth() * 1.02;
 
         return closeVertically && closeInX && headlineStrong && subtitleSized && subtitleNarrower;
+    }
+
+    /**
+     * Remove subtitle-like candidates that sit directly below a stronger headline.
+     * This prevents one article from being split into two articles (headline + subtitle).
+     */
+    private List<Line> suppressSubtitleOnlyTitleCandidates(List<Line> titles, double bodyMedian, double pageWidth) {
+        if (titles == null || titles.size() < 2) {
+            return titles == null ? Collections.emptyList() : titles;
+        }
+
+        List<Line> sorted = new ArrayList<>(titles);
+        sorted.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        boolean[] drop = new boolean[sorted.size()];
+
+        for (int i = 1; i < sorted.size(); i++) {
+            Line cur = sorted.get(i);
+            if (cur == null || cur.getText() == null) continue;
+            String curText = cur.getText().trim();
+            if (curText.isEmpty()) continue;
+
+            Line bestPrev = null;
+            int bestPrevIdx = -1;
+            for (int j = i - 1; j >= 0; j--) {
+                Line prev = sorted.get(j);
+                if (prev == null) continue;
+                double overlap = PdfColumnSupport.horizontalOverlapRatio(prev, cur);
+                if (overlap < 0.45) continue;
+                double gap = cur.getY0() - prev.getY1();
+                if (gap < -bodyMedian * 0.4 || gap > bodyMedian * 3.0) continue;
+                bestPrev = prev;
+                bestPrevIdx = j;
+                break;
+            }
+            if (bestPrev == null) continue;
+
+            double gap = cur.getY0() - bestPrev.getY1();
+            boolean prevLooksHeadline = bestPrev.getMaxSize() >= bodyMedian * 1.35
+                    && bestPrev.getWidth() >= pageWidth * 0.20;
+            boolean curLooksSubtitle = cur.getMaxSize() <= bestPrev.getMaxSize() * 0.88
+                    && cur.getMaxSize() >= bodyMedian * 1.02
+                    && cur.getWidth() <= bestPrev.getWidth() * 1.03;
+            boolean closeX = Math.abs(cur.getX0() - bestPrev.getX0()) <= pageWidth * 0.07;
+            boolean closeY = gap >= -bodyMedian * 0.4 && gap <= bodyMedian * 2.8;
+
+            if (prevLooksHeadline && curLooksSubtitle && closeX && closeY) {
+                drop[i] = true;
+                log.debug("[TITLE-SUB] suppress subtitle candidate: prev='{}' / cur='{}'",
+                        bestPrev.getText(), curText);
+                // Keep stronger headline, suppress only current subtitle-like candidate.
+                if (bestPrevIdx >= 0) {
+                    drop[bestPrevIdx] = drop[bestPrevIdx] && bestPrev.getMaxSize() < cur.getMaxSize();
+                }
+            }
+        }
+
+        List<Line> out = new ArrayList<>();
+        for (int i = 0; i < sorted.size(); i++) {
+            if (!drop[i]) out.add(sorted.get(i));
+        }
+        return out;
+    }
+
+    /**
+     * Remove overlong/body-like title candidates that are often created by OCR row merges.
+     */
+    private List<Line> dropBodyLikeOverlongTitleCandidates(List<Line> titles, double bodyMedian, double pageWidth) {
+        if (titles == null || titles.isEmpty()) {
+            return titles == null ? Collections.emptyList() : titles;
+        }
+
+        List<Line> out = new ArrayList<>();
+        for (Line t : titles) {
+            if (t == null || t.getText() == null) continue;
+            String text = t.getText().trim();
+            if (text.isEmpty()) continue;
+
+            int len = text.length();
+            boolean tooLong = len > 95;
+            boolean bodyLikeLong = len > 50 && t.getMaxSize() < bodyMedian * 1.22;
+            boolean fullRowBodyLike = len > 35
+                    && t.getWidth() >= pageWidth * 0.85
+                    && t.getMaxSize() < bodyMedian * 1.35;
+
+            if (tooLong || bodyLikeLong || fullRowBodyLike) {
+                log.debug("[TITLE-FILTER] drop body-like title candidate: {}", text);
+                continue;
+            }
+            out.add(t);
+        }
+        return out;
     }
 
     private boolean isArticleExpandedToRight(PdfArticle article, List<Double> pageSplits, double pageWidth) {
