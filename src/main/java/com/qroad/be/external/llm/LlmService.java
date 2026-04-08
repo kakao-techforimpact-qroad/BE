@@ -289,12 +289,13 @@ public class LlmService {
     }
 
     private String callGpt4oMini(String prompt) {
+        String safePrompt = sanitizeForOpenAiJson(prompt);
         ChatCompletionRequest request = ChatCompletionRequest.builder()
                 .model("gpt-4o-mini")
                 .messages(List.of(
                         new ChatMessage(ChatMessageRole.SYSTEM.value(),
                                 "당신은 신문 기사 분석 전문가입니다. 반드시 JSON만 반환하세요."),
-                        new ChatMessage(ChatMessageRole.USER.value(), prompt)))
+                        new ChatMessage(ChatMessageRole.USER.value(), safePrompt)))
                 .temperature(0.3)
                 .maxTokens(4000)
                 .build();
@@ -308,9 +309,11 @@ public class LlmService {
     }
 
     private String buildMetadataAnalysisPrompt(String body, String knownTitle) {
-        String titleInstruction = knownTitle.isEmpty()
+        String safeBody = sanitizeForOpenAiJson(body);
+        String safeKnownTitle = sanitizeForOpenAiJson(knownTitle);
+        String titleInstruction = safeKnownTitle.isEmpty()
                 ? "1) 기사 제목을 본문에서 추출하세요."
-                : String.format("1) title은 반드시 %s 를 그대로 사용하세요.", knownTitle);
+                : String.format("1) title은 반드시 %s 를 그대로 사용하세요.", safeKnownTitle);
 
         return """
                 다음은 신문 기사 본문입니다. 아래 작업을 수행하고 JSON만 반환하세요.
@@ -333,7 +336,20 @@ public class LlmService {
                   "keywords": ["키워드1", "키워드2", "키워드3"],
                   "category": "카테고리"
                 }
-                """.formatted(body, titleInstruction);
+                """.formatted(safeBody, titleInstruction);
+    }
+
+    /**
+     * Raw OCR/PDF 텍스트의 제어문자를 제거해 OpenAI 요청 JSON 직렬화 오류를 예방한다.
+     */
+    private String sanitizeForOpenAiJson(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+                .replace("\uFEFF", "")
+                .replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "")
+                .trim();
     }
 
     private List<String> chunkByPdfMarkers(String paperContent) {
