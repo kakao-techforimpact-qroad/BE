@@ -53,6 +53,10 @@ public class PdfExtractorService {
     private static final java.util.regex.Pattern PAGE_NUM_STRIP = java.util.regex.Pattern
             .compile("^\\d{1,3}\\s+|\\s+\\d{1,3}$");
     private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
+    // 기사 종료 신호로 사용하는 기자명+이메일 패턴
+    private static final Pattern REPORTER_EMAIL_PATTERN = Pattern.compile(
+            "([\\uAC00-\\uD7A3]{2,4})\\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+)"
+    );
 
     // 광고 판별 패턴
     // 전화번호: 02-1234-5678 / 010-1234-5678 / (02)1234-5678 형태
@@ -74,6 +78,21 @@ public class PdfExtractorService {
     private static final Pattern PUBLIC_NOTICE_PATTERN = Pattern.compile(
             "입\\s*찰\\s*공\\s*고|채\\s*용\\s*공\\s*고|공\\s*개\\s*모\\s*집|" +
             "지\\s*원\\s*자\\s*격|접\\s*수\\s*기\\s*간|제\\s*출\\s*서\\s*류|응\\s*시\\s*자\\s*격");
+    private static final Pattern WEEKDAY_DATE_PATTERN = Pattern.compile("\\b\\d{1,2}\\s*\\(\\s*[월화수목금토일]\\s*\\)");
+    private static final Pattern TIME_PATTERN = Pattern.compile("\\b(?:[01]?\\d|2[0-3]):[0-5]\\d\\b");
+    private static final Pattern CLASSIFIED_KEYWORD_PATTERN = Pattern.compile(
+            "주택\\s*매매|토지\\s*매매|상가|임대|전세|월세|보증금|급매|매물|구인|구직|직원\\s*구인|공인중개사");
+    private static final double TITLE_RATIO_THRESHOLD_NON_BOLD = 1.24;
+    private static final double TITLE_RATIO_THRESHOLD_BOLD = 1.12;
+    private static final double TITLE_ABS_THRESHOLD_NON_BOLD = 11.0;
+    private static final double TITLE_ABS_THRESHOLD_BOLD = 10.3;
+    private static final double STRONG_HEADLINE_RATIO = 1.58;
+    private static final double STRONG_HEADLINE_MIN_WIDTH_RATIO = 0.34;
+    private static final Pattern SUBHEADING_MARKER_PATTERN = Pattern.compile("^[■◆▲●◇□▪ㆍ·].*");
+    // 안정화 모드: 과분리/과합침을 유발할 수 있는 실험적 보정은 기본 OFF
+    private static final boolean ENABLE_SINGLE_COLUMN_SPLIT_PATCH = false;
+    private static final boolean ENABLE_SUBCOLUMN_BODY_FILTER = false;
+    private static final boolean ENABLE_INTERNAL_HEADLINE_SPLIT = true;
 
     // ──────────────────────── public entry point ────────────────────────
 
@@ -151,7 +170,7 @@ public class PdfExtractorService {
             }
             */
 
-            return new ExtractionResult(sb.toString(), images);
+            return new ExtractionResult(sb.toString(), images, allArticles);
         }
     }
 
@@ -166,14 +185,17 @@ public class PdfExtractorService {
     public static class ExtractionResult {
         private final String text;
         private final List<ArticleImageData> articleImages;
+        private final List<PdfArticle> articles;
 
-        public ExtractionResult(String text, List<ArticleImageData> articleImages) {
+        public ExtractionResult(String text, List<ArticleImageData> articleImages, List<PdfArticle> articles) {
             this.text = text;
             this.articleImages = articleImages;
+            this.articles = articles;
         }
 
         public String getText() { return text; }
         public List<ArticleImageData> getArticleImages() { return articleImages; }
+        public List<PdfArticle> getArticles() { return articles; }
     }
 
     /**
@@ -210,6 +232,7 @@ public class PdfExtractorService {
      */
     private boolean isLikelyAd(String body) {
         if (EXPLICIT_AD_MARKER.matcher(body).find()) return true;
+        if (isStrongTimetableAd(body)) return true;
 
         int score = 0;
         if (PHONE_PATTERN.matcher(body).find())        score += 2;
@@ -226,6 +249,47 @@ public class PdfExtractorService {
         return score >= 4;
     }
 
+    /**
+     * 일반 기사의 단발성 시간 언급은 허용하고,
+     * 날짜(요일)+시각이 반복되는 표 형태일 때만 광고/시간표로 판정합니다.
+     */
+    private boolean isStrongTimetableAd(String body) {
+        int weekdayDateCount = (int) WEEKDAY_DATE_PATTERN.matcher(body).results().count();
+        int timeCount = (int) TIME_PATTERN.matcher(body).results().count();
+        long structuredLines = Arrays.stream(body.split("\\R"))
+                .map(String::trim)
+                .filter(line -> !line.isEmpty())
+                .filter(line -> line.length() <= 40)
+                .filter(line -> WEEKDAY_DATE_PATTERN.matcher(line).find() || TIME_PATTERN.matcher(line).find())
+                .count();
+        long totalLines = Arrays.stream(body.split("\\R"))
+                .map(String::trim)
+                .filter(line -> !line.isEmpty())
+                .count();
+        double ratio = totalLines == 0 ? 0.0 : (double) structuredLines / totalLines;
+        return (weekdayDateCount >= 4 && timeCount >= 8) || (timeCount >= 12 && ratio >= 0.6);
+    }
+
+    /**
+     * 장터/매물/구인 중심의 분류면 성격 페이지는 통째로 분리 대상에서 제외합니다.
+     */
+    private boolean isLikelyClassifiedPage(List<Line> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return false;
+        }
+        String merged = lines.stream().map(Line::getText).collect(Collectors.joining("\n"));
+        int phoneCount = (int) PHONE_PATTERN.matcher(merged).results().count();
+        int keywordCount = (int) CLASSIFIED_KEYWORD_PATTERN.matcher(merged).results().count();
+        long bulletLines = lines.stream()
+                .map(Line::getText)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(t -> t.startsWith("◆") || t.startsWith("■") || t.startsWith("☎"))
+                .count();
+
+        return phoneCount >= 3 && keywordCount >= 4 && bulletLines >= 6;
+    }
+
     // ──────────────────────── title detection ────────────────────────
 
     private boolean isProbableTitle(Line line, double bodyMedian) {
@@ -236,8 +300,8 @@ public class PdfExtractorService {
 
         // 비볼드: 원래 검증된 1.38 배율 유지 (소제목 오인식 방지)
         // 볼드:   1.15 배율 허용 (볼드 자체가 강한 제목 신호이므로 완화)
-        double ratioThreshold = line.isBold() ? 1.15 : 1.38;
-        double absThreshold   = line.isBold() ? 10.5 : 12.5;
+        double ratioThreshold = line.isBold() ? TITLE_RATIO_THRESHOLD_BOLD : TITLE_RATIO_THRESHOLD_NON_BOLD;
+        double absThreshold   = line.isBold() ? TITLE_ABS_THRESHOLD_BOLD : TITLE_ABS_THRESHOLD_NON_BOLD;
         if (line.getMaxSize() < Math.max(bodyMedian * ratioThreshold, absThreshold))
             return false;
 
@@ -259,6 +323,12 @@ public class PdfExtractorService {
         // Reject titles starting with certain markers (but allow "…" as valid Korean
         // title prefix)
         if (t.startsWith("▶") || t.startsWith("▷"))
+            return false;
+        if (SUBHEADING_MARKER_PATTERN.matcher(t).matches())
+            return false;
+
+        // 기자명+이메일 줄은 제목이 아니라 기사 종료부이므로 제외
+        if (t.contains("@") || REPORTER_EMAIL_PATTERN.matcher(t).find())
             return false;
 
         return true;
@@ -346,6 +416,43 @@ public class PdfExtractorService {
         return picked;
     }
 
+    /**
+     * 본문 bbox 안에 다른 기사 컬럼 꼬리 라인이 섞일 때,
+     * 제목이 시작한 하위 컬럼(anchor) 기준으로 라인을 재필터링합니다.
+     */
+    private List<Line> filterBodyLinesByAnchorSubColumn(
+            List<Line> bodyLines,
+            double articleX0,
+            double articleX1,
+            double titleX0,
+            boolean allowRightAdjacentSubColumn
+    ) {
+        if (bodyLines.size() < 8) {
+            return bodyLines;
+        }
+
+        List<Double> xs = bodyLines.stream().map(Line::getX0).collect(Collectors.toList());
+        double localWidth = Math.max(1.0, articleX1 - articleX0);
+        List<Double> localSplits = inferColumnSplits(xs, localWidth);
+        if (localSplits.isEmpty()) {
+            return bodyLines;
+        }
+
+        int anchorCol = assignCol(titleX0, localSplits);
+        List<Line> filtered = bodyLines.stream()
+                .filter(line -> {
+                    int c = assignCol(line.getX0(), localSplits);
+                    if (c == anchorCol) {
+                        return true;
+                    }
+                    return allowRightAdjacentSubColumn && c == anchorCol + 1;
+                })
+                .collect(Collectors.toList());
+
+        // 과필터링 방지
+        return filtered.size() >= 4 ? filtered : bodyLines;
+    }
+
     private List<Line> sortLinesReadingOrder(List<Line> lines, double pageWidth) {
         if (lines.size() <= 2) {
             List<Line> copy = new ArrayList<>(lines);
@@ -373,6 +480,635 @@ public class PdfExtractorService {
         return ordered;
     }
 
+    private double horizontalOverlapRatio(Line a, Line b) {
+        double ax0 = a.getBbox()[0], ax1 = a.getBbox()[2];
+        double bx0 = b.getBbox()[0], bx1 = b.getBbox()[2];
+        double inter = Math.max(0, Math.min(ax1, bx1) - Math.max(ax0, bx0));
+        double minWidth = Math.max(1.0, Math.min(ax1 - ax0, bx1 - bx0));
+        return inter / minWidth;
+    }
+
+    /**
+     * 본문 중간의 볼드 소제목 오탐을 줄이기 위한 필터.
+     * 메인 제목은 보통 위/아래 여백이 크고, 소제목은 본문에 촘촘히 끼어 있는 경우가 많다는 점을 이용합니다.
+     */
+    private boolean isLikelyEmbeddedSubheading(Line candidate, List<Line> lines, double bodyMedian, double pageWidth) {
+        // 매우 강한 제목 형태는 소제목으로 오판하지 않도록 보호
+        if (isStrongHeadlineShape(candidate, bodyMedian, pageWidth)) {
+            return false;
+        }
+
+        double size = candidate.getMaxSize();
+        boolean onlySlightlyBigger = size < bodyMedian * 1.34;
+        boolean narrowWidth = candidate.getWidth() < pageWidth * 0.45;
+
+        Line nearestAbove = null;
+        Line nearestBelow = null;
+        for (Line line : lines) {
+            if (line == candidate) {
+                continue;
+            }
+            if (horizontalOverlapRatio(line, candidate) < 0.45) {
+                continue;
+            }
+
+            if (line.getY1() <= candidate.getY0()) {
+                if (nearestAbove == null || line.getY1() > nearestAbove.getY1()) {
+                    nearestAbove = line;
+                }
+            } else if (line.getY0() >= candidate.getY1()) {
+                if (nearestBelow == null || line.getY0() < nearestBelow.getY0()) {
+                    nearestBelow = line;
+                }
+            }
+        }
+
+        if (nearestAbove == null || nearestBelow == null) {
+            return false;
+        }
+
+        double topGap = candidate.getY0() - nearestAbove.getY1();
+        double bottomGap = nearestBelow.getY0() - candidate.getY1();
+        boolean tightlyEmbedded = topGap >= 0 && bottomGap >= 0
+                && topGap < bodyMedian * 1.25
+                && bottomGap < bodyMedian * 1.45;
+
+        return onlySlightlyBigger && narrowWidth && tightlyEmbedded;
+    }
+
+    private boolean isStrongHeadlineShape(Line candidate, double bodyMedian, double pageWidth) {
+        if (candidate == null) {
+            return false;
+        }
+        String text = candidate.getText() == null ? "" : candidate.getText().trim();
+        if (text.length() < 8) {
+            return false;
+        }
+        boolean sizeStrong = candidate.getMaxSize() >= bodyMedian * STRONG_HEADLINE_RATIO;
+        boolean widthStrong = candidate.getWidth() >= pageWidth * STRONG_HEADLINE_MIN_WIDTH_RATIO;
+        return sizeStrong && widthStrong;
+    }
+
+    private double[] unionBbox(List<Line> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return new double[] { 0, 0, 0, 0 };
+        }
+        double x0 = Double.MAX_VALUE, y0 = Double.MAX_VALUE;
+        double x1 = 0, y1 = 0;
+        for (Line l : lines) {
+            x0 = Math.min(x0, l.getBbox()[0]);
+            y0 = Math.min(y0, l.getBbox()[1]);
+            x1 = Math.max(x1, l.getBbox()[2]);
+            y1 = Math.max(y1, l.getBbox()[3]);
+        }
+        return new double[] { x0, y0, x1, y1 };
+    }
+
+    private int findInternalHeadlineSplitIndex(List<Line> ordered, double bodyMedian, double pageWidth) {
+        if (ordered == null || ordered.size() < 10) {
+            return -1;
+        }
+
+        for (int i = 3; i < ordered.size() - 3; i++) {
+            Line line = ordered.get(i);
+            String text = line.getText() == null ? "" : line.getText().trim();
+            if (text.length() < 8 || text.length() > 70) {
+                continue;
+            }
+            if (SUBHEADING_MARKER_PATTERN.matcher(text).matches()) {
+                continue;
+            }
+            if (REPORTER_EMAIL_PATTERN.matcher(text).find()) {
+                continue;
+            }
+
+            if (text.endsWith("기자") || text.endsWith("보도자료")) {
+                continue;
+            }
+
+            boolean strongSize = line.getMaxSize() >= bodyMedian * 1.40
+                    || (line.isBold() && line.getMaxSize() >= bodyMedian * 1.28);
+            boolean strongWidth = line.getWidth() >= pageWidth * 0.25;
+            if (!strongSize || !strongWidth) {
+                continue;
+            }
+
+            Line prev = ordered.get(i - 1);
+            Line next = ordered.get(i + 1);
+            double topGap = line.getY0() - prev.getY1();
+            double bottomGap = next.getY0() - line.getY1();
+            boolean separated = topGap >= bodyMedian * 0.45 && bottomGap >= bodyMedian * 0.45;
+            if (!separated) {
+                continue;
+            }
+
+            int beforeChars = ordered.subList(0, i).stream()
+                    .map(Line::getText)
+                    .filter(Objects::nonNull)
+                    .mapToInt(String::length)
+                    .sum();
+            int afterChars = ordered.subList(i + 1, ordered.size()).stream()
+                    .map(Line::getText)
+                    .filter(Objects::nonNull)
+                    .mapToInt(String::length)
+                    .sum();
+            if (beforeChars < 80 || afterChars < 80) {
+                continue;
+            }
+
+            return i;
+        }
+        return -1;
+    }
+
+    private boolean isLikelyNewArticleTitleAfterReporter(Line line, double bodyMedian, double pageWidth) {
+        if (line == null) {
+            return false;
+        }
+        String text = line.getText() == null ? "" : line.getText().trim();
+        if (text.length() < 8 || text.length() > 90) {
+            return false;
+        }
+        if (text.startsWith("▶") || text.startsWith("▷")) {
+            return false;
+        }
+        if (SUBHEADING_MARKER_PATTERN.matcher(text).matches()) {
+            return false;
+        }
+        if (REPORTER_EMAIL_PATTERN.matcher(text).find() || text.contains("@")) {
+            return false;
+        }
+
+        boolean strongBySize = line.getMaxSize() >= bodyMedian * 1.33;
+        boolean strongByBold = line.isBold() && line.getMaxSize() >= bodyMedian * 1.24;
+        boolean enoughWidth = line.getWidth() >= pageWidth * 0.22;
+        return (strongBySize || strongByBold) && enoughWidth;
+    }
+
+    private int findReporterBoundaryIndex(List<Line> ordered) {
+        int last = -1;
+        for (int i = 0; i < ordered.size(); i++) {
+            String text = ordered.get(i).getText();
+            if (text != null && REPORTER_EMAIL_PATTERN.matcher(text).find()) {
+                last = i;
+            }
+        }
+        return last;
+    }
+
+    private int findFirstStrongTitleInTail(List<Line> lines, int start, double bodyMedian, double pageWidth) {
+        for (int i = Math.max(0, start); i < lines.size(); i++) {
+            if (isLikelyNewArticleTitleAfterReporter(lines.get(i), bodyMedian, pageWidth)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private List<Line> filterMainTitleCandidates(
+            List<Line> titleCandidates,
+            List<Line> allLines,
+            double bodyMedian,
+            double pageWidth
+    ) {
+        if (titleCandidates.isEmpty()) {
+            return titleCandidates;
+        }
+
+        List<Line> filtered = titleCandidates.stream()
+                .filter(t -> !isLikelyEmbeddedSubheading(t, allLines, bodyMedian, pageWidth))
+                .collect(Collectors.toList());
+
+        // 본문 중간 독립 기사의 강한 제목이 과하게 제거된 경우 복원
+        filtered = restoreStandaloneDroppedTitles(titleCandidates, filtered, allLines, bodyMedian, pageWidth);
+
+        // 컬럼 맨 위의 독립 제목은 소제목 필터에서 빠지지 않도록 보호
+        filtered = restoreTopTitlesPerColumn(titleCandidates, filtered, pageWidth);
+
+        // 과필터링 방지: 전부 제거되면 원래 후보를 사용
+        return filtered.isEmpty() ? titleCandidates : filtered;
+    }
+
+    private boolean isRelaxedUpperHeadlineCandidate(Line line, double bodyMedian, double pageWidth) {
+        String text = line.getText() == null ? "" : line.getText().trim();
+        if (text.length() < 8 || text.length() > 80) {
+            return false;
+        }
+        if (text.startsWith("▶") || text.startsWith("▷")) {
+            return false;
+        }
+        if (SUBHEADING_MARKER_PATTERN.matcher(text).matches()) {
+            return false;
+        }
+        if (REPORTER_EMAIL_PATTERN.matcher(text).find() || text.contains("@")) {
+            return false;
+        }
+
+        boolean sizeEnough = line.getMaxSize() >= bodyMedian * 1.14
+                || (line.isBold() && line.getMaxSize() >= bodyMedian * 1.05);
+        boolean widthEnough = line.getWidth() >= pageWidth * 0.18;
+        return sizeEnough && widthEnough;
+    }
+
+    private List<Line> augmentMissingUpperHeadlinePerColumn(
+            List<Line> titles,
+            List<Line> allLines,
+            double bodyMedian,
+            double pageWidth,
+            double pageHeight
+    ) {
+        if (allLines.isEmpty()) {
+            return titles;
+        }
+
+        List<Double> xsAll = allLines.stream().map(Line::getX0).collect(Collectors.toList());
+        List<Double> splits = inferColumnSplits(xsAll, pageWidth);
+        int colCount = splits.size() + 1;
+
+        Map<Integer, List<Line>> titleByCol = new HashMap<>();
+        for (Line t : titles) {
+            int col = assignCol(t.getX0(), splits);
+            titleByCol.computeIfAbsent(col, k -> new ArrayList<>()).add(t);
+        }
+        titleByCol.values().forEach(list -> list.sort(Comparator.comparingDouble(Line::getY0)));
+
+        Set<Line> augmented = new LinkedHashSet<>(titles);
+        double upperBand = pageHeight * 0.36;
+
+        for (int col = 0; col < colCount; col++) {
+            List<Line> colTitles = titleByCol.getOrDefault(col, Collections.emptyList());
+            double firstTitleY = colTitles.isEmpty() ? Double.MAX_VALUE : colTitles.get(0).getY0();
+            if (firstTitleY <= upperBand) {
+                continue;
+            }
+
+            Line best = null;
+            for (Line line : allLines) {
+                if (assignCol(line.getX0(), splits) != col) {
+                    continue;
+                }
+                if (line.getY0() > upperBand) {
+                    continue;
+                }
+                if (!isRelaxedUpperHeadlineCandidate(line, bodyMedian, pageWidth)) {
+                    continue;
+                }
+                if (best == null || line.getY0() < best.getY0()) {
+                    best = line;
+                }
+            }
+            if (best != null) {
+                augmented.add(best);
+            }
+        }
+
+        List<Line> result = new ArrayList<>(augmented);
+        result.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return result;
+    }
+
+    private List<Line> restoreTopTitlesPerColumn(
+            List<Line> originalCandidates,
+            List<Line> filteredCandidates,
+            double pageWidth
+    ) {
+        if (originalCandidates.isEmpty()) {
+            return filteredCandidates;
+        }
+
+        List<Double> xs = originalCandidates.stream().map(Line::getX0).collect(Collectors.toList());
+        List<Double> splits = inferColumnSplits(xs, pageWidth);
+
+        Map<Integer, Line> topByColumn = new HashMap<>();
+        for (Line line : originalCandidates) {
+            int col = assignCol(line.getX0(), splits);
+            Line current = topByColumn.get(col);
+            if (current == null
+                    || line.getY0() < current.getY0()
+                    || (Math.abs(line.getY0() - current.getY0()) < 1.0 && line.getX0() < current.getX0())) {
+                topByColumn.put(col, line);
+            }
+        }
+
+        Set<Line> restored = new LinkedHashSet<>(filteredCandidates);
+        restored.addAll(topByColumn.values());
+
+        List<Line> result = new ArrayList<>(restored);
+        result.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return result;
+    }
+
+    private List<Line> restoreStandaloneDroppedTitles(
+            List<Line> originalCandidates,
+            List<Line> filteredCandidates,
+            List<Line> allLines,
+            double bodyMedian,
+            double pageWidth
+    ) {
+        Set<Line> kept = new LinkedHashSet<>(filteredCandidates);
+        for (Line candidate : originalCandidates) {
+            if (kept.contains(candidate)) {
+                continue;
+            }
+            if (isLikelyStandaloneTitleBlock(candidate, allLines, bodyMedian, pageWidth)) {
+                kept.add(candidate);
+            }
+        }
+        List<Line> result = new ArrayList<>(kept);
+        result.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return result;
+    }
+
+    private boolean isLikelyStandaloneTitleBlock(
+            Line candidate,
+            List<Line> allLines,
+            double bodyMedian,
+            double pageWidth
+    ) {
+        String text = candidate.getText() == null ? "" : candidate.getText().trim();
+        if (text.length() < 9 || text.length() > 80) {
+            return false;
+        }
+        if (SUBHEADING_MARKER_PATTERN.matcher(text).matches()) {
+            return false;
+        }
+
+        boolean strongSize = candidate.getMaxSize() >= bodyMedian * 1.42
+                || (candidate.isBold() && candidate.getMaxSize() >= bodyMedian * 1.30);
+        boolean enoughWidth = candidate.getWidth() >= pageWidth * 0.25;
+        if (!strongSize || !enoughWidth) {
+            return false;
+        }
+
+        Line nearestAbove = null;
+        Line nearestBelow = null;
+        for (Line line : allLines) {
+            if (line == candidate || horizontalOverlapRatio(line, candidate) < 0.40) {
+                continue;
+            }
+            if (line.getY1() <= candidate.getY0()) {
+                if (nearestAbove == null || line.getY1() > nearestAbove.getY1()) {
+                    nearestAbove = line;
+                }
+            } else if (line.getY0() >= candidate.getY1()) {
+                if (nearestBelow == null || line.getY0() < nearestBelow.getY0()) {
+                    nearestBelow = line;
+                }
+            }
+        }
+        if (nearestAbove == null || nearestBelow == null) {
+            return false;
+        }
+
+        double topGap = candidate.getY0() - nearestAbove.getY1();
+        double bottomGap = nearestBelow.getY0() - candidate.getY1();
+        return topGap >= bodyMedian * 1.55 && bottomGap >= bodyMedian * 1.0;
+    }
+
+    private boolean hasCompetingTitleNearTop(
+            int columnIndex,
+            double y0,
+            double bodyMedian,
+            Map<Integer, List<Line>> titlesByCol
+    ) {
+        List<Line> colTitles = titlesByCol.getOrDefault(columnIndex, Collections.emptyList());
+        double thresholdY = y0 + bodyMedian * 6.0;
+        for (Line title : colTitles) {
+            if (title.getY0() > y0 && title.getY0() <= thresholdY) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 기사 제목 아래에 인접 컬럼 본문이 함께 시작되는 경우(좌/우 2단 기사)를 감지합니다.
+     */
+    private boolean shouldExpandToRightAdjacentColumn(
+            Line title,
+            int columnIndex,
+            List<Double> splits,
+            List<Line> allLines,
+            Map<Integer, List<Line>> titlesByCol,
+            double bodyMedian
+    ) {
+        int lastCol = splits.size();
+        if (columnIndex >= lastCol) {
+            return false;
+        }
+
+        double colX0 = (columnIndex == 0) ? 0 : splits.get(columnIndex - 1);
+        double colX1 = splits.get(columnIndex);
+        double colWidth = Math.max(1.0, colX1 - colX0);
+        double titleWidth = title.getWidth();
+
+        // 메인 제목이 현재 컬럼에서 충분히 넓게 잡히지 않으면 확장하지 않음
+        if (titleWidth < colWidth * 0.72) {
+            return false;
+        }
+
+        int rightCol = columnIndex + 1;
+        double rightX0 = splits.get(columnIndex);
+        double rightX1 = (rightCol == splits.size()) ? Double.MAX_VALUE : splits.get(rightCol);
+        double probeTop = title.getY1();
+        double probeBottom = probeTop + bodyMedian * 10.0;
+        double titleY0 = title.getY0();
+
+        long rightBodyLines = allLines.stream()
+                .filter(l -> l.getX0() >= rightX0 && l.getX0() < rightX1)
+                .filter(l -> l.getY0() >= probeTop && l.getY0() <= probeBottom)
+                .filter(l -> l.getMaxSize() <= bodyMedian * 1.20)
+                .filter(l -> l.getText() != null && l.getText().trim().length() >= 4)
+                .count();
+
+        // 오른쪽 컬럼 상단에 경쟁 제목이 있으면 해당 컬럼은 다른 기사일 확률이 큼
+        if (hasCompetingTitleNearTop(rightCol, probeTop, bodyMedian, titlesByCol)) {
+            return false;
+        }
+        // 확장 예상 구간(제목 주변 포함)에 오른쪽 컬럼의 다른 제목이 있으면 확장을 금지
+        double rightGuardTop = titleY0 - bodyMedian * 2.0;
+        double rightGuardBottom = probeTop + bodyMedian * 18.0;
+        boolean hasRightCompetingTitle = titlesByCol.getOrDefault(rightCol, Collections.emptyList()).stream()
+                .anyMatch(t -> t != title && t.getY0() >= rightGuardTop && t.getY0() <= rightGuardBottom);
+        if (hasRightCompetingTitle) {
+            return false;
+        }
+
+        // 현재 제목이 컬럼 경계 근처까지 실제로 확장된 형태가 아니면 우측 확장을 하지 않음
+        boolean reachesBoundary = title.getBbox()[2] >= colX1 - colWidth * 0.08;
+        if (!reachesBoundary) {
+            return false;
+        }
+
+        return rightBodyLines >= 3;
+    }
+
+    private double findNextTitleTopInColumn(List<Line> colTitles, double currentTitleY) {
+        double next = Double.MAX_VALUE;
+        for (Line t : colTitles) {
+            if (t.getY0() > currentTitleY && t.getY0() < next) {
+                next = t.getY0();
+            }
+        }
+        return next;
+    }
+
+    /**
+     * 제목들이 전부 하나의 컬럼으로 오인식됐지만 x축으로 크게 벌어져 있으면
+     * 가장 큰 간격 지점에 임시 split을 추가해 좌/우 기사 분리를 보정합니다.
+     */
+    private List<Double> patchSplitsIfSingleColumnMisdetected(List<Line> titles, List<Double> splits, double pageWidth) {
+        if (titles == null || titles.size() < 2) {
+            return splits;
+        }
+
+        // 현재 split 기준으로도 제목이 한 컬럼으로만 매핑될 때만 보정
+        Set<Integer> mappedCols = titles.stream()
+                .map(t -> assignCol(t.getX0(), splits))
+                .collect(Collectors.toSet());
+        if (mappedCols.size() > 1) {
+            return splits;
+        }
+
+        List<Double> xs = titles.stream()
+                .map(Line::getX0)
+                .sorted()
+                .collect(Collectors.toList());
+        double maxGap = 0.0;
+        int maxGapIdx = -1;
+        for (int i = 0; i < xs.size() - 1; i++) {
+            double gap = xs.get(i + 1) - xs.get(i);
+            if (gap > maxGap) {
+                maxGap = gap;
+                maxGapIdx = i;
+            }
+        }
+
+        // 지면 폭 대비 충분히 큰 간격일 때만 분할(보수적)
+        if (maxGapIdx < 0 || maxGap < pageWidth * 0.18) {
+            return splits;
+        }
+
+        double newSplit = (xs.get(maxGapIdx) + xs.get(maxGapIdx + 1)) / 2.0;
+        List<Double> patched = new ArrayList<>(splits);
+        patched.add(newSplit);
+        patched = patched.stream()
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+        return patched;
+    }
+
+    private boolean isInsideBboxCenter(Line line, double[] bbox) {
+        double cx = (line.getBbox()[0] + line.getBbox()[2]) / 2.0;
+        double cy = (line.getBbox()[1] + line.getBbox()[3]) / 2.0;
+        return cx >= bbox[0] && cx <= bbox[2] && cy >= bbox[1] && cy <= bbox[3];
+    }
+
+    private boolean overlapsArticleTitleArea(Line line, PdfArticle article) {
+        if (article.getTitleBbox() == null) {
+            return false;
+        }
+        double[] lb = line.getBbox();
+        double[] tb = article.getTitleBbox();
+        double interX = Math.max(0, Math.min(lb[2], tb[2]) - Math.max(lb[0], tb[0]));
+        double minW = Math.max(1.0, Math.min(lb[2] - lb[0], tb[2] - tb[0]));
+        double overlapRatio = interX / minW;
+        boolean yNear = lb[1] <= tb[3] + 2 && lb[3] >= tb[1] - 2;
+        return overlapRatio >= 0.5 && yNear;
+    }
+
+    /**
+     * 한 줄이 여러 기사에 중복으로 들어가지 않도록, 가장 가까운 기사 하나에만 귀속시킵니다.
+     */
+    private List<PdfArticle> enforceUniqueBodyLineOwnership(
+            List<PdfArticle> articles,
+            List<Line> allLines,
+            double pageWidth,
+            List<Double> pageSplits,
+            double bodyMedian
+    ) {
+        if (articles == null || articles.isEmpty() || allLines == null || allLines.isEmpty()) {
+            return articles;
+        }
+
+        Map<PdfArticle, List<Line>> owned = new LinkedHashMap<>();
+        for (PdfArticle article : articles) {
+            owned.put(article, new ArrayList<>());
+        }
+
+        for (Line line : allLines) {
+            String text = line.getText();
+            if (text == null || text.trim().isEmpty()) {
+                continue;
+            }
+            // 제목으로 보이는 라인이 본문으로 흘러들어가 중복되는 현상 방지
+            if (isProbableTitle(line, bodyMedian)) {
+                continue;
+            }
+
+            List<PdfArticle> candidates = new ArrayList<>();
+            for (PdfArticle article : articles) {
+                if (article.getBodyBbox() == null || article.getTitleBbox() == null) {
+                    continue;
+                }
+                if (!isInsideBboxCenter(line, article.getBodyBbox())) {
+                    continue;
+                }
+                // 제목 영역 라인은 본문 귀속에서 제외
+                if (overlapsArticleTitleArea(line, article)) {
+                    continue;
+                }
+                // 제목보다 위 라인은 제외
+                if (line.getY0() < article.getTitleBbox()[3] - 2) {
+                    continue;
+                }
+                candidates.add(article);
+            }
+
+            if (candidates.isEmpty()) {
+                continue;
+            }
+
+            PdfArticle best = null;
+            double bestScore = Double.MAX_VALUE;
+            int lineCol = assignCol(line.getX0(), pageSplits);
+            double lineCy = (line.getBbox()[1] + line.getBbox()[3]) / 2.0;
+
+            for (PdfArticle article : candidates) {
+                double titleBottom = article.getTitleBbox()[3];
+                double bodyBottom = article.getBodyBbox()[3];
+                double verticalScore = Math.abs(lineCy - Math.max(titleBottom, Math.min(lineCy, bodyBottom)));
+                double colPenalty = (lineCol == article.getColumnIndex()) ? 0.0 : 120.0;
+                double score = verticalScore + colPenalty;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = article;
+                }
+            }
+
+            if (best != null) {
+                owned.get(best).add(line);
+            }
+        }
+
+        for (PdfArticle article : articles) {
+            List<Line> lines = owned.getOrDefault(article, List.of());
+            if (lines.size() < 3) {
+                continue;
+            }
+            List<Line> ordered = sortLinesReadingOrder(lines, pageWidth);
+            String rebuilt = ordered.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+            if (rebuilt.length() < 50) {
+                continue;
+            }
+            article.setText(rebuilt);
+            article.setBodyBbox(unionBbox(ordered));
+        }
+
+        return articles;
+    }
+
     // ──────────────────────── continuation detection ────────────────────────
 
     private Integer detectContinuation(String text) {
@@ -398,6 +1134,9 @@ public class PdfExtractorService {
         if (lines.isEmpty() || sizes.isEmpty()) {
             return Collections.emptyList();
         }
+        if (isLikelyClassifiedPage(lines)) {
+            return Collections.emptyList();
+        }
 
         // Compute body median font size
         List<Double> sortedSizes = new ArrayList<>(sizes);
@@ -408,6 +1147,8 @@ public class PdfExtractorService {
         List<Line> titles = lines.stream()
                 .filter(l -> isProbableTitle(l, bodyMedian))
                 .collect(Collectors.toList());
+        titles = filterMainTitleCandidates(titles, lines, bodyMedian, W);
+        titles = augmentMissingUpperHeadlinePerColumn(titles, lines, bodyMedian, W, H);
 
         if (titles.isEmpty()) {
             return Collections.emptyList();
@@ -418,6 +1159,9 @@ public class PdfExtractorService {
         List<Double> xsAll = lines.stream().map(Line::getX0).collect(Collectors.toList());
         List<Double> xsForSplits = xsTitle.size() >= 8 ? xsTitle : xsAll;
         List<Double> splits = inferColumnSplits(xsForSplits, W);
+        if (ENABLE_SINGLE_COLUMN_SPLIT_PATCH) {
+            splits = patchSplitsIfSingleColumnMisdetected(titles, splits, W);
+        }
 
         // Group titles by column
         Map<Integer, List<Line>> titlesByCol = new TreeMap<>();
@@ -455,6 +1199,7 @@ public class PdfExtractorService {
                 // If title width > 40% of page, extend article x-range
                 double titleWidth = t.getBbox()[2] - t.getBbox()[0];
                 double artX0, artX1;
+                boolean expandedToRight = false;
                 if (titleWidth > W * 0.4) {
                     artX0 = Math.max(0, t.getBbox()[0] - margin);
                     artX1 = Math.min(W, t.getBbox()[2] + margin);
@@ -463,10 +1208,39 @@ public class PdfExtractorService {
                     artX1 = colX1;
                 }
 
+                // 좌/우 2단짜리 단일 기사인 경우 오른쪽 인접 컬럼까지 본문 범위를 확장
+                if (shouldExpandToRightAdjacentColumn(t, c, splits, lines, titlesByCol, bodyMedian)) {
+                    int rightCol = c + 1;
+                    double rightColX1 = (rightCol == splits.size()) ? W : splits.get(rightCol);
+                    artX1 = Math.max(artX1, Math.min(W, rightColX1 + margin));
+                    expandedToRight = true;
+
+                    double nextInCurrent = findNextTitleTopInColumn(titlesByCol.getOrDefault(c, Collections.emptyList()), t.getY0());
+                    double nextInRight = findNextTitleTopInColumn(titlesByCol.getOrDefault(rightCol, Collections.emptyList()), t.getY0());
+                    double nextTop = Math.min(nextInCurrent, nextInRight);
+                    if (nextTop != Double.MAX_VALUE) {
+                        y1 = Math.min(y1, nextTop - 2);
+                    }
+                }
+
                 double[] bodyBbox = clampBbox(new double[] { artX0, y0, artX1, y1 }, mediaBox);
 
                 List<Line> bodyLines = linesInBbox(lines, bodyBbox);
+                if (ENABLE_SUBCOLUMN_BODY_FILTER) {
+                    bodyLines = filterBodyLinesByAnchorSubColumn(
+                            bodyLines,
+                            artX0,
+                            artX1,
+                            t.getX0(),
+                            expandedToRight
+                    );
+                }
                 List<Line> ordered = sortLinesReadingOrder(bodyLines, W);
+                int reporterIdx = findReporterBoundaryIndex(ordered);
+                int forcedSplitIdx = -1;
+                if (reporterIdx >= 0 && reporterIdx < ordered.size() - 6) {
+                    forcedSplitIdx = findFirstStrongTitleInTail(ordered, reporterIdx + 1, bodyMedian, W);
+                }
 
                 String text = ordered.stream()
                         .map(Line::getText)
@@ -483,6 +1257,80 @@ public class PdfExtractorService {
                 // Clean up title: strip merged page numbers from section headers
                 String titleText = PAGE_NUM_STRIP.matcher(t.getText()).replaceAll("").trim();
 
+                // 기자줄 이후에 새 강한 제목이 등장하면 이전 기사 오염으로 보고 강제 분리
+                if (forcedSplitIdx > 0) {
+                    List<Line> part1 = ordered.subList(0, reporterIdx + 1);
+                    Line splitTitle = ordered.get(forcedSplitIdx);
+                    List<Line> part2Body = ordered.subList(forcedSplitIdx + 1, ordered.size());
+
+                    String part1Text = part1.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+                    String part2Text = part2Body.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+
+                    if (part1Text.length() >= 120 && part2Text.length() >= 120) {
+                        if (!isLikelyAd(part1Text)) {
+                            PdfArticle a1 = new PdfArticle();
+                            a1.setTitle(titleText);
+                            a1.setTitleBbox(t.getBbox());
+                            a1.setBodyBbox(unionBbox(part1));
+                            a1.setText(part1Text);
+                            a1.setContinuationToPage(detectContinuation(part1Text));
+                            a1.setColumnIndex(c);
+                            articles.add(a1);
+                        }
+
+                        String secondTitle = PAGE_NUM_STRIP.matcher(splitTitle.getText()).replaceAll("").trim();
+                        if (!isLikelyAd(part2Text)) {
+                            PdfArticle a2 = new PdfArticle();
+                            a2.setTitle(secondTitle);
+                            a2.setTitleBbox(splitTitle.getBbox());
+                            a2.setBodyBbox(unionBbox(part2Body));
+                            a2.setText(part2Text);
+                            a2.setContinuationToPage(detectContinuation(part2Text));
+                            a2.setColumnIndex(c);
+                            articles.add(a2);
+                        }
+                        continue;
+                    }
+                }
+
+                int splitIdx = ENABLE_INTERNAL_HEADLINE_SPLIT
+                        ? findInternalHeadlineSplitIndex(ordered, bodyMedian, W)
+                        : -1;
+                if (splitIdx > 0) {
+                    List<Line> part1 = ordered.subList(0, splitIdx);
+                    Line splitTitle = ordered.get(splitIdx);
+                    List<Line> part2 = ordered.subList(splitIdx + 1, ordered.size());
+
+                    String part1Text = part1.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+                    String part2Text = part2.stream().map(Line::getText).collect(Collectors.joining("\n")).trim();
+
+                    if (part1Text.length() >= 120 && part2Text.length() >= 120) {
+                        if (!isLikelyAd(part1Text)) {
+                            PdfArticle a1 = new PdfArticle();
+                            a1.setTitle(titleText);
+                            a1.setTitleBbox(t.getBbox());
+                            a1.setBodyBbox(unionBbox(part1));
+                            a1.setText(part1Text);
+                            a1.setContinuationToPage(detectContinuation(part1Text));
+                            a1.setColumnIndex(c);
+                            articles.add(a1);
+                        }
+
+                        String secondTitle = PAGE_NUM_STRIP.matcher(splitTitle.getText()).replaceAll("").trim();
+                        if (!isLikelyAd(part2Text)) {
+                            PdfArticle a2 = new PdfArticle();
+                            a2.setTitle(secondTitle);
+                            a2.setTitleBbox(splitTitle.getBbox());
+                            a2.setBodyBbox(unionBbox(part2));
+                            a2.setText(part2Text);
+                            a2.setContinuationToPage(detectContinuation(part2Text));
+                            a2.setColumnIndex(c);
+                            articles.add(a2);
+                        }
+                        continue;
+                    }
+                }
+
                 PdfArticle article = new PdfArticle();
                 article.setTitle(titleText);
                 article.setTitleBbox(t.getBbox());
@@ -495,11 +1343,147 @@ public class PdfExtractorService {
             }
         }
 
-        // Sort by title y0 then x0 (reading order)
-        articles.sort(Comparator.comparingDouble((PdfArticle a) -> a.getTitleBbox()[1])
+        articles = enforceUniqueBodyLineOwnership(articles, lines, W, splits, bodyMedian);
+
+        // 다단 지면 읽기 순서: 왼쪽 컬럼 -> 오른쪽 컬럼, 각 컬럼 내 위에서 아래
+        articles.sort(Comparator.comparingInt(PdfArticle::getColumnIndex)
+                .thenComparingDouble(a -> a.getTitleBbox()[1])
                 .thenComparingDouble(a -> a.getTitleBbox()[0]));
 
+        // 페이지 라인에서 기자 줄을 보정하여 기사 끝 신호 강화
+        attachReporterLinesFromPage(articles, lines, splits);
+        // 최종 reporter/email 메타데이터 채움
+        for (PdfArticle article : articles) {
+            fillReporterAndEmail(article);
+        }
+
         return articles;
+    }
+
+    /**
+     * 같은 컬럼에서 매우 근접하게 분리된 기사 조각을, 첫 조각에 기자 줄이 없으면 이어 붙입니다.
+     * 목적: 소제목/강조문이 제목으로 오탐되어 기사가 잘리는 현상 완화
+     */
+    private List<PdfArticle> mergeFragmentsUntilReporter(List<PdfArticle> sortedArticles) {
+        if (sortedArticles.isEmpty()) {
+            return sortedArticles;
+        }
+
+        List<PdfArticle> merged = new ArrayList<>();
+        for (PdfArticle current : sortedArticles) {
+            if (merged.isEmpty()) {
+                merged.add(current);
+                continue;
+            }
+
+            PdfArticle prev = merged.get(merged.size() - 1);
+            boolean sameColumn = prev.getColumnIndex() == current.getColumnIndex();
+            boolean prevHasReporter = containsReporterEmail(prev.getText());
+            double gap = current.getTitleBbox()[1] - prev.getBodyBbox()[3];
+            boolean closeEnough = gap >= -6 && gap <= 36;
+
+            if (sameColumn && !prevHasReporter && closeEnough) {
+                String extra = (current.getTitle() + "\n" + current.getText()).trim();
+                String base = prev.getText() == null ? "" : prev.getText().trim();
+                prev.setText((base + "\n" + extra).trim());
+
+                double[] pb = prev.getBodyBbox();
+                double[] cb = current.getBodyBbox();
+                prev.setBodyBbox(new double[] {
+                        Math.min(pb[0], cb[0]),
+                        Math.min(pb[1], cb[1]),
+                        Math.max(pb[2], cb[2]),
+                        Math.max(pb[3], cb[3])
+                });
+
+                if (prev.getContinuationToPage() == null && current.getContinuationToPage() != null) {
+                    prev.setContinuationToPage(current.getContinuationToPage());
+                }
+            } else {
+                merged.add(current);
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * 페이지 전체에서 기자명+이메일 줄을 찾아 가장 가까운 이전 기사에 붙입니다.
+     * 목적: bbox 경계 때문에 기사 본문에서 빠진 기자 줄 보정
+     */
+    private void attachReporterLinesFromPage(List<PdfArticle> articles, List<Line> lines, List<Double> splits) {
+        if (articles.isEmpty() || lines.isEmpty()) {
+            return;
+        }
+
+        for (Line line : lines) {
+            String t = line.getText();
+            if (t == null || t.isBlank()) {
+                continue;
+            }
+            if (!REPORTER_EMAIL_PATTERN.matcher(t).find()) {
+                continue;
+            }
+
+            int lineCol = assignCol(line.getX0(), splits);
+            double lineY = line.getY0();
+            PdfArticle best = null;
+            double bestDistance = Double.MAX_VALUE;
+
+            for (PdfArticle article : articles) {
+                if (article.getColumnIndex() != lineCol) {
+                    continue;
+                }
+                if (article.getTitleBbox()[1] > lineY) {
+                    continue;
+                }
+
+                double distance = Math.abs(lineY - article.getBodyBbox()[3]);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = article;
+                }
+            }
+
+            if (best == null || bestDistance > 140) {
+                continue;
+            }
+
+            String body = best.getText() == null ? "" : best.getText();
+            if (!body.contains(t)) {
+                best.setText((body + "\n" + t).trim());
+                double[] bb = best.getBodyBbox();
+                double[] lb = line.getBbox();
+                best.setBodyBbox(new double[] {
+                        Math.min(bb[0], lb[0]),
+                        Math.min(bb[1], lb[1]),
+                        Math.max(bb[2], lb[2]),
+                        Math.max(bb[3], lb[3])
+                });
+            }
+        }
+    }
+
+    private boolean containsReporterEmail(String text) {
+        return text != null && REPORTER_EMAIL_PATTERN.matcher(text).find();
+    }
+
+    private void fillReporterAndEmail(PdfArticle article) {
+        if (article == null || article.getText() == null) {
+            return;
+        }
+
+        Matcher matcher = REPORTER_EMAIL_PATTERN.matcher(article.getText());
+        String lastName = null;
+        String lastEmail = null;
+        while (matcher.find()) {
+            lastName = matcher.group(1);
+            lastEmail = matcher.group(2);
+        }
+
+        if (lastName != null && lastEmail != null) {
+            article.setReporter(lastName);
+            article.setEmail(lastEmail);
+        }
     }
 
     // ──────────────────────── internal process ────────────────────────
