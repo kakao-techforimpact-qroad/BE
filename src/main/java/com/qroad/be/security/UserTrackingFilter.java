@@ -34,12 +34,14 @@ public class UserTrackingFilter extends OncePerRequestFilter {
 
         // 불필요한 경로 필터링
         if (shouldTrack(path)) {
-            userAccessService.save(uuid, path, isNewUser);
-            metricsService.recordRequest(path);
+            if (isUserPath(path)) {
+                userAccessService.save(uuid, path, isNewUser);
 
-            if (isNewUser) {
-                metricsService.recordNewUser();
+                if (isNewUser) {
+                    metricsService.recordNewUser();
+                }
             }
+            metricsService.recordRequest(path);
         }
 
         filterChain.doFilter(request, response);
@@ -55,5 +57,9 @@ public class UserTrackingFilter extends OncePerRequestFilter {
         return !path.startsWith("/actuator")
                 && !path.startsWith("/favicon")
                 && !path.startsWith("/static");
+    }
+
+    private boolean isUserPath(String path) {
+        return path.startsWith("/api/qr/");
     }
 }
