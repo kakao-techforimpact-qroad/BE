@@ -67,6 +67,7 @@ public class PaperService {
         private final PublicationProgressStore publicationProgressStore;
         private final S3PresignService s3PresignService;
         private final PdfExtractorService pdfExtractorService;
+        private final PythonPdfSegmentationService pythonPdfSegmentationService;
 
         /**
          * API 1: 발행된 신문 리스트 조회
@@ -268,24 +269,35 @@ public class PaperService {
                 log.info("신문 지면 생성 시작: title={}, publishedDate={}, adminId={}",
                                 request.getTitle(), request.getPublishedDate(), adminId);
 
-                // PDF를 한 번만 읽어서 텍스트와 이미지를 동시에 추출
+                // 파이썬 기반 분리 엔진 우선 사용
                 ExtractionResult extraction = runInStep(jobId, PublicationStep.PDF_READING, () -> {
                         try {
                                 byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
-                                ExtractionResult result = pdfExtractorService.extractWithImages(
+                                var output = pythonPdfSegmentationService.segment(
                                                 pdfBytes,
+                                                request.getTempKey(),
                                                 (processed, total) -> {
                                                         if (jobId != null) {
                                                                 publicationProgressStore.updatePdfReadingProgress(jobId, processed,
                                                                                 total);
                                                         }
                                                 });
-                                log.info("PDF 추출 완료: tempKey={}, textLength={}, imageCount={}",
-                                                request.getTempKey(), result.getText().length(),
-                                                result.getArticleImages().size());
-                                return result;
+                                log.info("파이썬 PDF 추출 완료: tempKey={}, textLength={}, articleCount={}",
+                                                request.getTempKey(), output.getPaperContent().length(),
+                                                output.getArticles().size());
+                                return new ExtractionResult(output.getPaperContent(), Collections.emptyList());
                         } catch (Exception e) {
-                                throw new RuntimeException("PDF 추출 실패: " + request.getTempKey(), e);
+                                log.error("파이썬 PDF 추출 실패, 자바 엔진으로 폴백 시도: {}", e.getMessage());
+                                try {
+                                        byte[] pdfBytes = s3PresignService.readPdfBytes(request.getTempKey());
+                                        return pdfExtractorService.extractWithImages(pdfBytes, (processed, total) -> {
+                                                if (jobId != null) {
+                                                        publicationProgressStore.updatePdfReadingProgress(jobId, processed, total);
+                                                }
+                                        });
+                                } catch (Exception ex) {
+                                        throw new RuntimeException("PDF 추출 최종 실패: " + request.getTempKey(), ex);
+                                }
                         }
                 });
                 String content = extraction.getText();
