@@ -116,20 +116,21 @@ jobs:
           set -euo pipefail
 
           APP_DIR="/opt/qroad"
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST }}"
           echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > /tmp/private_key
           chmod 600 /tmp/private_key
 
-          ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@api.qroad.info "
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@${DEPLOY_HOST} "
             set -euo pipefail &&
             sudo mkdir -p '${APP_DIR}' &&
             sudo chown ubuntu:ubuntu '${APP_DIR}' &&
             mkdir -p /home/ubuntu/log/qroad-be
           "
 
-          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key docker-compose.prod.yml ubuntu@api.qroad.info:${APP_DIR}/docker-compose.prod.yml
-          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key scripts/deploy.sh ubuntu@api.qroad.info:${APP_DIR}/deploy.sh
+          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key docker-compose.prod.yml ubuntu@${DEPLOY_HOST}:${APP_DIR}/docker-compose.prod.yml
+          scp -o StrictHostKeyChecking=accept-new -i /tmp/private_key scripts/deploy.sh ubuntu@${DEPLOY_HOST}:${APP_DIR}/deploy.sh
 
-          ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@api.qroad.info "
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/private_key ubuntu@${DEPLOY_HOST} "
             set -euo pipefail &&
             chmod +x '${APP_DIR}/deploy.sh' &&
             export APP_DIR='${APP_DIR}' &&
@@ -147,6 +148,7 @@ jobs:
             export AWS_REGION='${{ secrets.AWS_REGION }}' &&
             export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' &&
             export JWT_SECRET='${{ secrets.JWT_SECRET }}' &&
+            export CORS_ALLOWED_ORIGINS='${{ secrets.CORS_ALLOWED_ORIGINS }}' &&
             export SPRING_AUTOCONFIGURE_EXCLUDE='org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration' &&
             '${APP_DIR}/deploy.sh'
           "
