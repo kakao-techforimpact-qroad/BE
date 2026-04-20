@@ -54,7 +54,6 @@ public class UserUuidCookieFilter extends OncePerRequestFilter {
             if (isValidUuid(value)) {
                 return value;
             }
-            return null;
         }
         return null;
     }

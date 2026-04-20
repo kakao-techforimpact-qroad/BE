@@ -3,9 +3,11 @@ package com.qroad.be.config;
 import com.qroad.be.security.JwtAuthenticationFilter;
 import com.qroad.be.security.JwtProvider;
 import com.qroad.be.security.UserUuidCookieFilter;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -15,15 +17,21 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
     private final UserUuidCookieFilter userUuidCookieFilter;
+    private final Environment environment;
+    @Value("${cors.allowed-origins}")
+    private String corsAllowedOrigins;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -45,6 +53,7 @@ public class SecurityConfig {
                                 "/api/qr/**",
                                 "/api/articles/**"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/reports").permitAll()
                         .anyRequest().authenticated()
                 )
@@ -64,17 +73,20 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of(
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "http://localhost:8080",
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:5173",
-                "https://qroad.info",
-                "https://www.qroad.info",
-                "https://api.qroad.info",
-                "https://www.api.qroad.info"
-        ));
+        LinkedHashSet<String> allowedOrigins = Arrays.stream(corsAllowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
+
+        if (Arrays.asList(environment.getActiveProfiles()).contains("dev")) {
+            allowedOrigins.add("http://localhost:3000");
+            allowedOrigins.add("http://localhost:5173");
+            allowedOrigins.add("http://localhost:8080");
+            allowedOrigins.add("http://127.0.0.1:3000");
+            allowedOrigins.add("http://127.0.0.1:5173");
+        }
+
+        config.setAllowedOrigins(new ArrayList<>(allowedOrigins));
 
         config.setAllowedMethods(List.of(
                 "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"
