@@ -46,6 +46,8 @@ export IMAGE_URI="${TARGET_IMAGE_URI}"
 docker compose -f "${COMPOSE_FILE}" up -d app
 
 echo "[5/5] Waiting for health check: ${HEALTH_CHECK_URL}"
+echo "Waiting 25 seconds for Spring Boot to start..."
+sleep 25
 for _ in $(seq 1 "${HEALTH_CHECK_RETRIES}"); do
   if curl -fsS "${HEALTH_CHECK_URL}" >/dev/null; then
     echo "Health check passed."
