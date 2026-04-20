@@ -6,7 +6,7 @@
 - Dockerfile: `Dockerfile`
 - Compose file: `docker-compose.prod.yml`
 - Deploy script: `scripts/deploy.sh`
-- Remote host: `ubuntu@api.qroad.info`
+- Remote host: `ubuntu@${DEPLOY_HOST}` (from GitHub secret)
 - Remote deploy dir: `/opt/qroad`
 
 ## Deployment Flow
@@ -47,6 +47,8 @@
 - `AWS_REGION`
 - `AWS_S3_PRESIGN_EXP_MINUTES`
 - `JWT_SECRET`
+- `DEPLOY_HOST` (example: `api.example.com`)
+- `CORS_ALLOWED_ORIGINS` (comma-separated origins)
 
 ## Failure Handling
 - If a step fails, workflow stops and reports failure in GitHub Actions.
@@ -62,7 +64,7 @@
 - Docker installed
 - Docker Compose V2 (`docker compose`)
 - `ubuntu` user can run Docker commands
-- SSH access to target host (`ubuntu@api.qroad.info`)
+- SSH access to target host configured in `DEPLOY_HOST`
 
 ## Manual Deployment (Server)
 Run these commands on the server:
