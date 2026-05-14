@@ -8,8 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -682,16 +680,161 @@ public class PdfExtractorService {
         return false;
     }
 
+    // 청크당 목표 크기: 30MB (Upstage 허용 범위 안으로)
+    private static final long CHUNK_TARGET_BYTES = 30L * 1024 * 1024;
+    private static final int  MIN_CHUNK_PAGES    = 2;
+    private static final int  MAX_CHUNK_PAGES    = 12;
+
     /**
      * Upstage API로 전체 PDF를 1회 파싱하여 전체 기사 목록을 반환합니다.
+     * 413 발생 시:
+     *   1차 — 페이지 분할 후 청크별 Upstage 호출 + elements 합산 처리 (이미지·레이아웃 완전 보존)
+     *   2차 — 이미지 제거 후 단일 Upstage 호출 (최후 수단)
      */
     private List<PdfArticle> extractAllWithUpstage(byte[] pdfBytes) {
+        // 원본 그대로 시도
         try {
             List<java.util.Map<String, Object>> elements = upstageService.parseToElements(pdfBytes);
             return upstageService.extractArticlesFromElements(elements);
         } catch (Exception e) {
-            log.error("[Upstage] API 호출 실패: {}", e.getMessage());
-            return Collections.emptyList();
+            String msg = e.getMessage() != null ? e.getMessage() : "";
+            if (!(msg.contains("413") || msg.contains("Too Large") || msg.contains("too large"))) {
+                log.error("[Upstage] API 호출 실패: {}", e.getMessage());
+                return Collections.emptyList();
+            }
+        }
+
+        // 1차 재시도: 페이지 분할 (이미지·좌표·레이아웃 완전 보존)
+        log.warn("[Upstage] 파일 크기 초과(413), 페이지 분할 후 재시도 ({}MB)",
+                pdfBytes.length / 1024 / 1024);
+        try {
+            List<PdfArticle> result = extractWithChunking(pdfBytes);
+            if (!result.isEmpty()) return result;
+            log.warn("[Upstage Chunked] 결과 없음 → 이미지 제거 폴백");
+        } catch (Exception e2) {
+            log.error("[Upstage Chunked] 실패: {} → 이미지 제거 폴백", e2.getMessage());
+        }
+
+        // 2차 재시도: 이미지 제거 (최후 수단)
+        log.warn("[Upstage] 이미지 제거 후 최종 재시도");
+        try {
+            byte[] stripped = stripImages(pdfBytes);
+            log.info("[Upstage] 이미지 제거 후 크기: {}MB → {}MB",
+                    pdfBytes.length / 1024 / 1024, stripped.length / 1024 / 1024);
+            List<java.util.Map<String, Object>> elements = upstageService.parseToElements(stripped);
+            return upstageService.extractArticlesFromElements(elements);
+        } catch (Exception e3) {
+            log.error("[Upstage] 이미지 제거 후 재시도도 실패: {}", e3.getMessage());
+        }
+
+        return Collections.emptyList();
+    }
+
+    /**
+     * PDF를 페이지 단위 청크로 분할해 청크별로 Upstage를 호출한 뒤,
+     * 각 청크의 elements에 페이지 오프셋을 적용하여 전체 합산 후 기사를 추출합니다.
+     *
+     * 이어짐 기사 병합이 안전한 이유:
+     *   mergeArticleContinuations는 페이지 번호가 아니라 ▷ 마커의 제목 텍스트로 매칭하므로
+     *   오프셋이 올바르게 적용된 전체 elements 리스트에서 1회 실행하면 청크 경계와 무관하게 동작합니다.
+     *
+     * 페이지 오프셋:
+     *   청크 i의 시작 페이지 인덱스(0-based) = i * chunkSize
+     *   Upstage는 청크 내 페이지를 1부터 반환하므로 실제 신문 면수 = Upstage page + offset
+     */
+    private List<PdfArticle> extractWithChunking(byte[] pdfBytes) throws IOException {
+        // 1단계: PDF 분할 (렌더링 없이 페이지 객체만 복사 → 빠름)
+        List<byte[]> chunks  = new ArrayList<>();
+        List<Integer> offsets = new ArrayList<>();
+
+        try (org.apache.pdfbox.pdmodel.PDDocument doc =
+                     org.apache.pdfbox.Loader.loadPDF(pdfBytes)) {
+            int totalPages   = doc.getNumberOfPages();
+            long bytesPerPage = pdfBytes.length / Math.max(1, totalPages);
+            int chunkSize = (int) Math.max(MIN_CHUNK_PAGES,
+                            Math.min(MAX_CHUNK_PAGES, CHUNK_TARGET_BYTES / Math.max(1, bytesPerPage)));
+
+            log.info("[Upstage Chunked] {}MB / {}페이지 → 청크당 {}페이지 (총 {}개 청크)",
+                    pdfBytes.length / 1024 / 1024, totalPages, chunkSize,
+                    (int) Math.ceil((double) totalPages / chunkSize));
+
+            for (int start = 0; start < totalPages; start += chunkSize) {
+                int end = Math.min(start + chunkSize, totalPages);
+                try (org.apache.pdfbox.pdmodel.PDDocument chunkDoc =
+                             new org.apache.pdfbox.pdmodel.PDDocument()) {
+                    for (int p = start; p < end; p++) {
+                        chunkDoc.importPage(doc.getPage(p));
+                    }
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    chunkDoc.save(baos);
+                    chunks.add(baos.toByteArray());
+                    offsets.add(start); // Upstage page 1 = 실제 신문 (start+1)면
+                }
+            }
+        }
+
+        // 2단계: 청크별 Upstage 호출 + 페이지 오프셋 적용
+        List<java.util.Map<String, Object>> allElements = new ArrayList<>();
+
+        for (int i = 0; i < chunks.size(); i++) {
+            byte[] chunk     = chunks.get(i);
+            int    pageOffset = offsets.get(i);
+
+            log.info("[Upstage Chunked] 청크 {}/{} 처리 중 ({}MB, 오프셋 +{}페이지)",
+                    i + 1, chunks.size(), chunk.length / 1024 / 1024, pageOffset);
+
+            List<java.util.Map<String, Object>> chunkElements =
+                    upstageService.parseToElements(chunk);
+
+            // 오프셋 적용 (첫 청크는 offset=0 이므로 스킵)
+            if (pageOffset > 0) {
+                chunkElements.forEach(el -> {
+                    Object page = el.get("page");
+                    if (page instanceof Number) {
+                        el.put("page", ((Number) page).intValue() + pageOffset);
+                    }
+                });
+            }
+
+            allElements.addAll(chunkElements);
+            log.info("[Upstage Chunked] 청크 {}/{} 완료 (elements {}개, 누계 {}개)",
+                    i + 1, chunks.size(), chunkElements.size(), allElements.size());
+        }
+
+        // 3단계: 전체 elements 합산 → 기사 추출 (이어짐 병합 포함)
+        log.info("[Upstage Chunked] 전체 elements {}개 → 기사 추출 시작", allElements.size());
+        return upstageService.extractArticlesFromElements(allElements);
+    }
+
+    /**
+     * PDFBox로 PDF에서 이미지 XObject를 제거하여 파일 크기를 줄입니다.
+     * 페이지 분할로도 처리 불가할 때 사용하는 최후 수단입니다.
+     */
+    private byte[] stripImages(byte[] pdfBytes) throws IOException {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc =
+                     org.apache.pdfbox.Loader.loadPDF(pdfBytes);
+             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+
+            for (org.apache.pdfbox.pdmodel.PDPage page : doc.getPages()) {
+                org.apache.pdfbox.pdmodel.PDResources res = page.getResources();
+                if (res == null) continue;
+
+                org.apache.pdfbox.cos.COSDictionary xObjects =
+                        (org.apache.pdfbox.cos.COSDictionary) res.getCOSObject()
+                                .getDictionaryObject(org.apache.pdfbox.cos.COSName.XOBJECT);
+                if (xObjects == null) continue;
+
+                List<org.apache.pdfbox.cos.COSName> toRemove = new ArrayList<>();
+                for (org.apache.pdfbox.cos.COSName name : res.getXObjectNames()) {
+                    try {
+                        if (res.isImageXObject(name)) toRemove.add(name);
+                    } catch (Exception ignored) {}
+                }
+                toRemove.forEach(xObjects::removeItem);
+            }
+
+            doc.save(baos);
+            return baos.toByteArray();
         }
     }
 

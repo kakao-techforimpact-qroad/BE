@@ -365,6 +365,13 @@ public class UpstageDocumentParseService {
     private static final Pattern CLASSIFIED_AD_PHONE = Pattern.compile("[☎✆]|\\d{2,3}[-.]\\d{3,4}[-.]\\d{4}");
     private static final Pattern CLASSIFIED_AD_DETAIL = Pattern.compile(
         "㎡|매매가|보증금|월\\s*\\d+만원|즉시입주|전세|방\\d|건평|대지|토지매매|임대|구합니다|아르바이트|홀서빙|급여협의");
+    // 분류광고 섹션 헤더 패턴: "주택·토지·창고", "상가·사무실", "사람구합니다" 등
+    private static final Pattern CLASSIFIED_SECTION_HEADER = Pattern.compile(
+        ".{1,15}구합니다$|.{1,15}모집합니다$|.{1,15}채용합니다$|" +
+        "(주택|토지|창고|상가|사무실|임야)([··](주택|토지|창고|상가|사무실|임야))+");
+    // 제목에 포함된 전화번호 패턴
+    private static final Pattern PHONE_IN_TITLE = Pattern.compile("\\d{2,4}[-).]\\s*\\d{3,4}[-.]\\d{4}");
+
     private boolean isClassifiedAd(String text) {
         // ◆로 시작하면 무조건 분류광고 (지역신문에서 ◆는 분류광고 전용 마커)
         if (text.startsWith("◆")) return true;
@@ -372,6 +379,8 @@ public class UpstageDocumentParseService {
         if (text.length() < 120
                 && CLASSIFIED_AD_PHONE.matcher(text).find()
                 && CLASSIFIED_AD_DETAIL.matcher(text).find()) return true;
+        // 분류광고 섹션 헤더 ("사람구합니다", "주택·토지·창고" 등)
+        if (text.length() <= 20 && CLASSIFIED_SECTION_HEADER.matcher(text).find()) return true;
         return false;
     }
 
@@ -388,9 +397,12 @@ public class UpstageDocumentParseService {
 
     private boolean isTitleElement(String category, int fontSize, String text, int h1Threshold) {
         // ▷ 마커 wrapping된 인용 조각: 닫는 따옴표로 끝나면서 여는 따옴표가 없는 경우만 제목 아님
-        // (“지역 연결 체계 강화 필요” 같이 제목 안에 따옴표 포함 시 정상 제목으로 허용)
         if (text.endsWith("\u201D") && !text.contains("\u201C")) return false;
         if (text.endsWith("\u2019") && !text.contains("\u2018")) return false;
+        // 전화번호 포함 텍스트는 제목 아님
+        if (PHONE_IN_TITLE.matcher(text).find()) return false;
+        // 분류광고 헤더는 제목 아님
+        if (isClassifiedAd(text)) return false;
         if ("heading1".equals(category) && fontSize >= h1Threshold) {
             boolean isSentenceEnding = text.endsWith(".") || text.contains("다.");
             boolean hasBullet = text.matches("^[■□●▶▷※○◆◇].*");
