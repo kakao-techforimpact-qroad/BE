@@ -607,6 +607,22 @@ public class PdfExtractorService {
             }
         }
         articles.removeAll(toRemove);
+
+        // ▶ 종료 마커 제거 (PDFBox 경로)
+        java.util.regex.Pattern contEndPat = java.util.regex.Pattern.compile(
+            "▶\\s*기사\\s*[\\d,·]+면\\s*이어짐(?:\\s*/[^\n]*)?"
+        );
+        // ▷ 시작 마커 제거 (PDFBox 경로: 병합된 continuation 본문 앞에 남은 마커)
+        java.util.regex.Pattern contStartPat = java.util.regex.Pattern.compile(
+            "▷\\s*\\d+면\\s*[‘’'“”\"](.+?)[‘’'“”\"]\\s*이어짐[^\n]*\n?",
+            java.util.regex.Pattern.DOTALL
+        );
+        for (PdfArticle article : articles) {
+            String t = article.getText();
+            t = contEndPat.matcher(t).replaceAll("");
+            t = contStartPat.matcher(t).replaceAll("");
+            article.setText(t.trim());
+        }
     }
 
     /**

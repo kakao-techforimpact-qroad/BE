@@ -28,60 +28,7 @@ public class PdfExtractorTest {
         Files.createDirectories(outputDir);
         System.out.println("Saving results to directory: " + outputDir);
 
-        // 1838 elements 덤프 (디버그용)
-        {
-            Path pdfPath = Paths.get("/Users/kim-yusin/article/TalkFile_1838.pdf");
-            if (Files.exists(pdfPath)) {
-                byte[] pdfBytes = Files.readAllBytes(pdfPath);
-                List<java.util.Map<String, Object>> elements = upstage.parseToElements(pdfBytes);
-                StringBuilder dump = new StringBuilder();
-                java.util.regex.Pattern fontPat = java.util.regex.Pattern.compile("font-size:(\\d+)px");
-                java.util.regex.Pattern tagPat  = java.util.regex.Pattern.compile("<[^>]+>");
-                for (java.util.Map<String, Object> el : elements) {
-                    String cat  = (String) el.get("category");
-                    int page    = el.get("page") instanceof Number ? ((Number)el.get("page")).intValue() : 0;
-                    Object cont = el.get("content");
-                    String html = "";
-                    if (cont instanceof java.util.Map) html = String.valueOf(((java.util.Map<?,?>)cont).get("html"));
-                    java.util.regex.Matcher fm = fontPat.matcher(html);
-                    int fs = fm.find() ? Integer.parseInt(fm.group(1)) : -1;
-                    String text = tagPat.matcher(html.replaceAll("(?i)<br\\s*/?>", " ")).replaceAll("").trim();
-                    if (text.length() > 80) text = text.substring(0, 77) + "...";
-                    // 좌표: coordinates 필드에서 yMin 추출
-                    Object coordsObj = el.get("coordinates");
-                    double yMin = -1;
-                    if (coordsObj instanceof java.util.List) {
-                        java.util.List<?> pts = (java.util.List<?>) coordsObj;
-                        for (Object pt : pts) {
-                            if (pt instanceof java.util.Map) {
-                                Object yVal = ((java.util.Map<?,?>)pt).get("y");
-                                if (yVal instanceof Number) {
-                                    double y = ((Number)yVal).doubleValue();
-                                    yMin = (yMin < 0) ? y : Math.min(yMin, y);
-                                }
-                            }
-                        }
-                    }
-                    // xMin 추출
-                    double xMin = -1;
-                    if (coordsObj instanceof java.util.List) {
-                        java.util.List<?> ptsX = (java.util.List<?>) coordsObj;
-                        for (Object ptX : ptsX) {
-                            if (ptX instanceof java.util.Map) {
-                                Object xVal = ((java.util.Map<?,?>)ptX).get("x");
-                                if (xVal instanceof Number) {
-                                    double xv = ((Number)xVal).doubleValue();
-                                    xMin = (xMin < 0) ? xv : Math.min(xMin, xv);
-                                }
-                            }
-                        }
-                    }
-                    dump.append(String.format("[p%d] %-12s fs=%2d  y=%.3f  x=%.3f  %s%n", page, cat, fs, yMin, xMin, text));
-                }
-                Files.writeString(outputDir.resolve("1838_elements_debug.txt"), dump.toString());
-                System.out.println("Saved element debug to: " + outputDir.resolve("1838_elements_debug.txt"));
-            }
-        }
+
 
         for (String name : fileNames) {
             Path pdfPath = Paths.get("/Users/kim-yusin/article/" + name + ".pdf");

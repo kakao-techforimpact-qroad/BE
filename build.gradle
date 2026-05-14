@@ -55,6 +55,7 @@ dependencies {
 }
 tasks.named('test') {
 	useJUnitPlatform()
+	environment "UPSTAGE_API_KEY", System.getenv("UPSTAGE_API_KEY") ?: ""
 }
 
 
