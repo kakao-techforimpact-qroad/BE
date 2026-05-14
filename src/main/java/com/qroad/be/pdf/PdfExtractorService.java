@@ -57,26 +57,8 @@ public class PdfExtractorService {
     private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
     private static final Pattern CONTINUED_FROM_PATTERN = Pattern.compile("^(\\d+)면(에서)?\\s*이어[짐서]");
 
-    // 광고 판별 패턴
-    // 전화번호: 02-1234-5678 / 010-1234-5678 / (02)1234-5678 형태
-    private static final Pattern PHONE_PATTERN = Pattern.compile(
-            "\\(?\\d{2,3}\\)?[-.]\\d{3,4}[-.]\\d{4}");
-    // URL
-    private static final Pattern URL_PATTERN = Pattern.compile(
-            "(?i)www\\.|http[s]?://");
-    // 광고 전용 키워드 — 뉴스 기사에 거의 등장하지 않는 표현만 선별
-    private static final Pattern AD_EXCLUSIVE_KEYWORD = Pattern.compile(
-            "선\\s*착\\s*순|분\\s*양\\s*안\\s*내|입\\s*주\\s*문\\s*의|할\\s*인\\s*이\\s*벤\\s*트|모\\s*집\\s*공\\s*고|대표\\s*번호");
-    // 명시적 광고/홍보 마커 — 하나만 있어도 즉시 광고 판정
-    private static final Pattern EXPLICIT_AD_MARKER = Pattern.compile(
-            "(?i)\\[광고]|\\(광고\\)|\\[PR]|\\[홍보]|\\[협찬]|\\(협찬\\)|광고문의|협찬문의");
-    // 가격 패턴 — 2회 이상 등장 시 광고 신호
-    private static final Pattern PRICE_PATTERN = Pattern.compile(
-            "\\d+\\s*만\\s*원|\\d+[,\\d]*\\s*원\\s*[(/]|\\d+\\.?\\d*\\s*%\\s*할인");
-    // 공고 패턴 — 채용·입찰·모집 공고 특유 표현
-    private static final Pattern PUBLIC_NOTICE_PATTERN = Pattern.compile(
-            "입\\s*찰\\s*공\\s*고|채\\s*용\\s*공\\s*고|공\\s*개\\s*모\\s*집|" +
-            "지\\s*원\\s*자\\s*격|접\\s*수\\s*기\\s*간|제\\s*출\\s*서\\s*류|응\\s*시\\s*자\\s*격");
+    // OCR 텍스트 내 전화번호 형태 매칭 (예: 000-0000-0000, 043-000-0000, 043)000-0000)
+    private static final Pattern PHONE_PATTERN = Pattern.compile("\\d{2,3}\\s*[-)]\\s*\\d{3,4}\\s*-\\s*\\d{4}");
 
     // ──────────────────────── public entry point ────────────────────────
 
@@ -224,38 +206,6 @@ public class PdfExtractorService {
         public byte[] getImageBytes() { return imageBytes; }
     }
 
-    // ──────────────────────── ad detection ────────────────────────
-
-    /**
-     * 본문 텍스트가 광고일 가능성이 높은지 판단합니다.
-     *
-     * 즉시 판정: 명시적 광고 마커([광고], [홍보], [협찬] 등)
-     * 점수 기반 판정 (임계값 4점):
-     *   - 전화번호 패턴: 2점
-     *   - URL 패턴: 2점
-     *   - 광고 전용 키워드(분양안내·선착순 등): 3점
-     *   - 공고 패턴(채용공고·입찰공고 등): 2점
-     *   - 가격 표현 2회 이상: 2점
-     *   - AD_KEYWORDS 3개 이상: 1점
-     */
-    private boolean isLikelyAd(String body) {
-        if (EXPLICIT_AD_MARKER.matcher(body).find()) return true;
-
-        int score = 0;
-        if (PHONE_PATTERN.matcher(body).find())        score += 2;
-        if (URL_PATTERN.matcher(body).find())          score += 2;
-        if (AD_EXCLUSIVE_KEYWORD.matcher(body).find()) score += 3;
-        if (PUBLIC_NOTICE_PATTERN.matcher(body).find()) score += 2;
-
-        long priceMatches = PRICE_PATTERN.matcher(body).results().count();
-        if (priceMatches >= 2) score += 2;
-
-        long adKwCount = AD_KEYWORDS.stream().filter(body::contains).count();
-        if (adKwCount >= 3) score += 1;
-
-        return score >= 4;
-    }
-
     // ──────────────────────── title detection ────────────────────────
 
     private boolean isProbableTitle(Line line, double bodyMedian, List<Double> splits, double pageWidth) {
@@ -302,7 +252,7 @@ public class PdfExtractorService {
     // ──────────────────────── column inference ────────────────────────
 
     private List<Double> inferColumnSplits(List<Double> xs, double pageWidth) {
-        if (xs.size() < 4)
+        if (xs.size() < 8)
             return Collections.emptyList();
 
         List<Double> sorted = new ArrayList<>(xs);
@@ -358,6 +308,126 @@ public class PdfExtractorService {
         return splits.size();
     }
 
+    private double centerX(Line line) {
+        double[] b = line.getBbox();
+        return (b[0] + b[2]) / 2.0;
+    }
+
+    private List<Line> mergeWrappedTitleLines(List<Line> sortedTitles, double bodyMedian, double pageWidth) {
+        if (sortedTitles == null || sortedTitles.size() <= 1) {
+            return sortedTitles == null ? Collections.emptyList() : new ArrayList<>(sortedTitles);
+        }
+
+        List<Line> merged = new ArrayList<>();
+        boolean[] consumed = new boolean[sortedTitles.size()];
+
+        for (int i = 0; i < sortedTitles.size(); i++) {
+            if (consumed[i]) {
+                continue;
+            }
+            Line current = sortedTitles.get(i);
+            consumed[i] = true;
+
+            while (true) {
+                int bestIdx = -1;
+                double bestGap = Double.MAX_VALUE;
+
+                for (int j = i + 1; j < sortedTitles.size(); j++) {
+                    if (consumed[j]) {
+                        continue;
+                    }
+                    Line cand = sortedTitles.get(j);
+                    double gap = cand.getY0() - current.getY1();
+
+                    // y 정렬 상태에서 너무 멀면 중단
+                    if (gap > Math.max(36.0, bodyMedian * 2.4)) {
+                        break;
+                    }
+                    if (!shouldMergeTitleLines(current, cand, bodyMedian, pageWidth)) {
+                        continue;
+                    }
+                    if (gap < bestGap) {
+                        bestGap = gap;
+                        bestIdx = j;
+                    }
+                }
+
+                if (bestIdx < 0) {
+                    break;
+                }
+
+                current = mergeTitleLines(current, sortedTitles.get(bestIdx));
+                consumed[bestIdx] = true;
+            }
+
+            merged.add(current);
+        }
+
+        merged.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
+        return merged;
+    }
+
+    private boolean shouldMergeTitleLines(Line upper, Line lower, double bodyMedian, double pageWidth) {
+        double gap = lower.getY0() - upper.getY1();
+        if (gap < -14) {
+            return false;
+        }
+        if (gap > Math.max(18.0, bodyMedian * 1.3)) {
+            return false;
+        }
+
+        // 본문급 폰트(부제목 등) 오병합 방지
+        if (Math.min(upper.getMaxSize(), lower.getMaxSize()) < Math.max(bodyMedian * 1.35, 13.5)) {
+            return false;
+        }
+
+        double cxDiff = Math.abs(centerX(upper) - centerX(lower));
+        if (cxDiff > pageWidth * 0.18) {
+            return false;
+        }
+
+        double[] ub = upper.getBbox();
+        double[] lb = lower.getBbox();
+        double overlap = Math.max(0, Math.min(ub[2], lb[2]) - Math.max(ub[0], lb[0]));
+        double minWidth = Math.min(upper.getWidth(), lower.getWidth());
+        if (minWidth <= 0) {
+            return false;
+        }
+
+        // 두 번째 줄이 짧은 인용구 제목일 수 있어 기본 임계값을 완화
+        if (overlap / minWidth < 0.30) {
+            return false;
+        }
+
+        double maxFont = Math.max(upper.getMaxSize(), lower.getMaxSize());
+        double minFont = Math.min(upper.getMaxSize(), lower.getMaxSize());
+        return maxFont > 0 && (maxFont - minFont) / maxFont <= 0.30;
+    }
+
+    private Line mergeTitleLines(Line upper, Line lower) {
+        String text = (upper.getText() + " " + lower.getText()).replaceAll("\\s+", " ").trim();
+        double[] ub = upper.getBbox();
+        double[] lb = lower.getBbox();
+        double[] bbox = new double[] {
+                Math.min(ub[0], lb[0]),
+                Math.min(ub[1], lb[1]),
+                Math.max(ub[2], lb[2]),
+                Math.max(ub[3], lb[3])
+        };
+        return new Line(text, bbox, Math.max(upper.getMaxSize(), lower.getMaxSize()));
+    }
+
+    private double nextTitleTopByAlignedX(List<Line> tlist, int currentIndex, double pageWidth, double defaultY) {
+        double curCx = centerX(tlist.get(currentIndex));
+        for (int j = currentIndex + 1; j < tlist.size(); j++) {
+            Line n = tlist.get(j);
+            if (Math.abs(centerX(n) - curCx) <= pageWidth * 0.22) {
+                return n.getBbox()[1] - 2;
+            }
+        }
+        return defaultY;
+    }
+
     // ──────────────────────── bbox helpers ────────────────────────
 
     private double[] clampBbox(double[] b, PDRectangle rect) {
@@ -393,7 +463,7 @@ public class PdfExtractorService {
 
         Map<Integer, List<Line>> cols = new TreeMap<>();
         for (Line l : lines) {
-            int c = assignCol(l.getX0(), splits);
+            int c = assignCol(centerX(l), splits);
             cols.computeIfAbsent(c, k -> new ArrayList<>()).add(l);
         }
 

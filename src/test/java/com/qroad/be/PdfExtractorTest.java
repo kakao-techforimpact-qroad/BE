@@ -1,13 +1,13 @@
 package com.qroad.be;
 
+import com.qroad.be.pdf.OcrService;
 import com.qroad.be.pdf.PdfExtractorService;
 import org.junit.jupiter.api.Test;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-
-import com.qroad.be.pdf.OcrService;
 
 public class PdfExtractorTest {
 

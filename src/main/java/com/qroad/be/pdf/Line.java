@@ -11,17 +11,15 @@ public class Line {
     private String text;
     private double[] bbox; // {x0, y0, x1, y1}
     private double maxSize;
-    private boolean bold;
     private double x0;
     private double y0;
     private double y1;
     private double width;
 
-    public Line(String text, double[] bbox, double maxSize, boolean bold) {
+    public Line(String text, double[] bbox, double maxSize) {
         this.text = text;
         this.bbox = bbox;
         this.maxSize = maxSize;
-        this.bold = bold;
         this.x0 = bbox[0];
         this.y0 = bbox[1];
         this.y1 = bbox[3];
@@ -38,10 +36,6 @@ public class Line {
 
     public double getMaxSize() {
         return maxSize;
-    }
-
-    public boolean isBold() {
-        return bold;
     }
 
     public double getX0() {

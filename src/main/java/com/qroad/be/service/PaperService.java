@@ -30,6 +30,7 @@ import java.time.YearMonth;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 
@@ -39,17 +40,18 @@ import com.qroad.be.pdf.PdfExtractorService.ExtractionResult;
 @Transactional(readOnly = true)
 public class PaperService {
 
-        // LLM이 반환하는 비기사 카테고리 정확한 명칭 (exact match)
-        private static final Set<String> NON_ARTICLE_CATEGORIES = Set.of(
-                "광고·홍보", "채용·모집 공고", "입찰·행정 공고"
-        );
-        // LLM이 변형된 형식으로 반환할 경우 대비 키워드 폴백 (contains match)
+        private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
+                        "\ubaa8\uc9d1", "\ucc44\uc6a9", "\uad6c\uc778", "\uacf5\uace0",
+                        "\uc54c\ub9bd\ub2c8\ub2e4", "\uc8fc\ubbfc\uac8c\uc2dc\ud310", "\uc6b0\ub9ac\ub3d9\ub124",
+                        "\uc0c1\uac00", "\uc0ac\ubb34\uc2e4", "\uc138 \ub193\uc2b5\ub2c8\ub2e4", "\ud301\ub2c8\ub2e4",
+                        "\uc0ac\ub78c\uad6c\ud569\ub2c8\ub2e4", "\uc8fc\ud0dd", "\ud1a0\uc9c0", "\ucc3d\uace0");
+        private static final List<Pattern> NON_ARTICLE_TITLE_PATTERNS = List.of(
+                        Pattern.compile("(?i)\\uc0ac\\s*\\uace0\\s*\\(\\s*\\u793e\\s*\\u544a\\s*\\)"),
+                        Pattern.compile("(?i)^\\s*\\uc54c\\ub9bd\\ub2c8\ub2e4\\s*$"),
+                        Pattern.compile("(?i)^\\s*\\uc8fc\\ubbfc\\s*\\uac8c\\uc2dc\\ud310\\s*$"));
+
         private static final List<String> AD_CATEGORY_KEYWORDS = List.of(
                 "광고", "홍보", "공고", "채용", "모집", "입찰"
-        );
-        // 카테고리 오분류 시 제목 기반 2차 필터 (단독 단어는 오탐 가능성으로 복합어만 사용)
-        private static final List<String> NON_ARTICLE_TITLE_KEYWORDS = List.of(
-                "모집공고", "직원모집", "채용공고", "구인공고"
         );
 
         private final PaperRepository paperRepository;
@@ -157,7 +159,7 @@ public class PaperService {
                 PaperEntity paper = paperRepository.findById(paperId)
                                 .orElseThrow(() -> new RuntimeException("신문을 찾을 수 없습니다."));
 
-                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatus(paperId, "ACTIVE");
+                List<ArticleEntity> articles = articleRepository.findByPaper_IdAndStatusOrderByIdAsc(paperId, "ACTIVE");
                 Map<Long, List<String>> keywordsByArticleId = getKeywordsForArticles(articles);
 
                 List<ArticleDto> articleDtos = articles.stream()
@@ -310,7 +312,7 @@ public class PaperService {
                 // AI 이미지를 카테고리별로 매핑하게 되면서 더 이상 PDF 이미지를 추출/업로드하지 않습니다.
                 // 기존 PDF 내 이미지 추출을 S3에 업로드하는 로직 제거됨
 
-                List<com.qroad.be.dto.ArticleChunkDTO> rawChunks = runInStep(
+                List<com.qroad.be.dto.ArticleChunkDTO> articleChunks = runInStep(
                                 jobId,
                                 PublicationStep.CHUNKING_AND_ANALYZING,
                                 () -> {
@@ -326,8 +328,6 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.ANALYSIS_FINALIZING, () -> {
                 });
-                final List<com.qroad.be.dto.ArticleChunkDTO> articleChunks =
-                                (rawChunks != null) ? rawChunks : new ArrayList<>();
                 log.info("총 {}개의 기사 청킹 완료", articleChunks.size());
 
                 final AdminEntity finalAdmin = admin;
@@ -336,35 +336,31 @@ public class PaperService {
                 AtomicInteger relatedProcessed = new AtomicInteger(0);
 
                 runInStep(jobId, PublicationStep.KEYWORD_MAPPING, () -> {
-                        for (com.qroad.be.dto.ArticleChunkDTO chunk : articleChunks) {
+                        for (int i = 0; i < articleChunks.size(); i++) {
+                                com.qroad.be.dto.ArticleChunkDTO chunk = articleChunks.get(i);
+                                int index = i + 1;
+                                if (isNonArticleTitle(chunk.getTitle(), chunk.getSummary())) {
+                                        log.info("기사 저장 제외(비기사): index={}/{}, title={}",
+                                                        index, totalChunks, chunk.getTitle());
+                                        continue;
+                                }
                                 // 광고·홍보·공고 카테고리 기사 저장 제외
-                                String category = chunk.getCategory() != null ? chunk.getCategory() : "";
-                                String title = chunk.getTitle() != null ? chunk.getTitle() : "";
-                                boolean isAdCategory = NON_ARTICLE_CATEGORIES.contains(category)
-                                                || AD_CATEGORY_KEYWORDS.stream().anyMatch(category::contains);
-                                boolean isNonArticleTitle = NON_ARTICLE_TITLE_KEYWORDS.stream()
-                                                .anyMatch(title::contains);
-                                if (isAdCategory || isNonArticleTitle) {
-                                        log.info("비기사/광고/공고 저장 제외: title={}, category={}",
-                                                title, category);
+                                boolean isAdCategory = AD_CATEGORY_KEYWORDS.stream()
+                                                .anyMatch(kw -> chunk.getCategory().contains(kw));
+                                if (isAdCategory) {
+                                        log.info("기사 저장 제외(광고/홍보/공고): index={}/{}, title={}, category={}",
+                                                        index, totalChunks, chunk.getTitle(), chunk.getCategory());
                                         continue;
                                 }
 
                                 // 카테고리 기사 AI 이미지를 매핑
                                 String imagePath = getCategoryImage(chunk.getCategory());
 
-                                String safeTitle = chunk.getTitle() != null && chunk.getTitle().length() > 255
-                                                ? chunk.getTitle().substring(0, 255)
-                                                : chunk.getTitle();
-                                String safeReporter = chunk.getReporter() != null && chunk.getReporter().length() > 100
-                                                ? chunk.getReporter().substring(0, 100)
-                                                : chunk.getReporter();
-
                                 ArticleEntity article = ArticleEntity.builder()
-                                                .title(safeTitle != null ? safeTitle : "")
+                                                .title(chunk.getTitle())
                                                 .content(chunk.getContent())
                                                 .summary(chunk.getSummary())
-                                                .reporter(safeReporter)
+                                                .reporter(chunk.getReporter())
                                                 .link("") // 기본값
                                                 .status("ACTIVE")
                                                 .paper(savedPaper)
@@ -373,18 +369,19 @@ public class PaperService {
                                                 .build();
 
                                 ArticleEntity savedArticle = articleRepository.save(article);
-                                log.info("Article 저장 완료: id={}, title={}, adminId={}",
-                                                savedArticle.getId(), savedArticle.getTitle(), adminId);
+                                log.info("기사 저장 완료: index={}/{}, articleId={}, title={}, category={}, adminId={}",
+                                                index,
+                                                totalChunks,
+                                                savedArticle.getId(),
+                                                savedArticle.getTitle(),
+                                                chunk.getCategory(),
+                                                adminId);
 
                                 List<String> savedKeywords = new ArrayList<>();
-                                List<String> uniqueKeywordNames = chunk.getKeywords() == null
-                                                ? new ArrayList<>()
-                                                : chunk.getKeywords().stream()
-                                                                .filter(k -> k != null && !k.trim().isEmpty())
-                                                                .map(String::trim)
-                                                                .distinct()
-                                                                .collect(Collectors.toList());
-                                for (String keywordName : uniqueKeywordNames) {
+                                for (String keywordName : chunk.getKeywords()) {
+                                        if (keywordName == null || keywordName.trim().isEmpty()) {
+                                                continue;
+                                        }
 
                                         // 키워드 존재 여부 확인 후 저장
                                         com.qroad.be.domain.KeywordEntity keyword = keywordRepository
@@ -458,8 +455,8 @@ public class PaperService {
 
                 runInStep(jobId, PublicationStep.SAVING, () -> {
                 });
-                log.info("신문 지면 생성 완료: paperId={}, 기사 수={}, adminId={}",
-                                savedPaper.getId(), articleChunks.size(), adminId);
+                log.info("신문 지면 생성 완료: paperId={}, 분석기사수={}, 저장기사수={}, adminId={}",
+                                savedPaper.getId(), articleChunks.size(), articleResponses.size(), adminId);
 
                 return com.qroad.be.dto.PaperCreateResponseDTO.builder()
                                 .paperId(savedPaper.getId())
@@ -513,10 +510,6 @@ public class PaperService {
                         log.error("연관 기사 생성을 위한 임베딩 실패: articleId={}", articleId, e);
                         return;
                 }
-                if (embedding == null || embedding.isEmpty()) {
-                        log.warn("연관 기사 임베딩 결과 없음: articleId={}", articleId);
-                        return;
-                }
                 String vectorString = embedding.toString();
 
                 // 3. 벡터 유사도 검색 (L2 거리 기준, 자기 자신 제외, 상위 3개)
@@ -536,11 +529,8 @@ public class PaperService {
 
                 // 4. 연관 기사 저장
                 for (Map<String, Object> row : rows) {
-                        Object rawArticleId = row.get("article_id");
-                        Object rawDistance = row.get("distance");
-                        if (rawArticleId == null || rawDistance == null) continue;
-                        Long relatedArticleId = ((Number) rawArticleId).longValue();
-                        Double distance = ((Number) rawDistance).doubleValue();
+                        Long relatedArticleId = ((Number) row.get("article_id")).longValue();
+                        Double distance = ((Number) row.get("distance")).doubleValue();
                         // 유사도 점수 변환 (거리가 0이면 유사도 1, 거리가 멀수록 0에 수렴하도록)
                         // 간단하게 1 / (1 + distance) 사용하거나, 그냥 distance 저장 (여기서는 distance가 작을수록 유사함)
                         // ArticleRelatedEntity의 score는 높을수록 유사한 것으로 가정하면 변환 필요.
@@ -586,10 +576,6 @@ public class PaperService {
                         embedding = llmService.getEmbedding(keywordText);
                 } catch (Exception e) {
                         log.error("연관 정책 생성을 위한 임베딩 실패: articleId={}", articleId, e);
-                        return;
-                }
-                if (embedding == null || embedding.isEmpty()) {
-                        log.warn("연관 정책 임베딩 결과 없음: articleId={}", articleId);
                         return;
                 }
                 String vectorString = embedding.toString();
@@ -649,18 +635,13 @@ public class PaperService {
 
                 // 키워드 수정
                 if (request.getKeywords() != null) {
-                        List<String> uniqueUpdateKeywords = request.getKeywords().stream()
-                                        .filter(k -> k != null && !k.trim().isEmpty())
-                                        .map(String::trim)
-                                        .distinct()
-                                        .collect(Collectors.toList());
-
-                        if (!uniqueUpdateKeywords.isEmpty()) {
                         // 기존 키워드 매핑 삭제
                         articleKeywordRepository.deleteByArticleId(articleId);
 
                         // 새 키워드 저장 및 매핑
-                        for (String keywordName : uniqueUpdateKeywords) {
+                        for (String keywordName : request.getKeywords()) {
+                                if (keywordName == null || keywordName.trim().isEmpty())
+                                        continue;
 
                                 com.qroad.be.domain.KeywordEntity keyword = keywordRepository
                                                 .findByName(keywordName.trim())
@@ -676,10 +657,9 @@ public class PaperService {
                         }
 
                         // 연관 기사 업데이트
-                        updateRelatedArticles(articleId, uniqueUpdateKeywords);
+                        updateRelatedArticles(articleId, request.getKeywords());
                         // 연관 정책 업데이트
-                        updateRelatedPolicies(articleId, uniqueUpdateKeywords);
-                        } // end if (!uniqueUpdateKeywords.isEmpty())
+                        updateRelatedPolicies(articleId, request.getKeywords());
                 }
 
                 ArticleEntity savedArticle = articleRepository.save(article);
@@ -698,6 +678,28 @@ public class PaperService {
         /**
          * LLM이 분류한 카테고리에 맞는 미리 만들어진 AI 이미지 경로(S3 Key)를 반환합니다.
          */
+        private boolean isNonArticleTitle(String title, String summary) {
+                String rawTitle = title == null ? "" : title;
+                String rawSummary = summary == null ? "" : summary;
+                String mergedRaw = (rawTitle + " " + rawSummary).trim();
+                String normalized = normalizeForMatch(mergedRaw);
+
+                boolean byKeyword = NON_ARTICLE_TITLE_KEYWORDS.stream()
+                                .map(this::normalizeForMatch)
+                                .anyMatch(normalized::contains);
+                if (byKeyword) {
+                        return true;
+                }
+                return NON_ARTICLE_TITLE_PATTERNS.stream().anyMatch(p -> p.matcher(mergedRaw).find());
+        }
+
+        private String normalizeForMatch(String text) {
+                if (text == null) {
+                        return "";
+                }
+                return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        }
+
         private String getCategoryImage(String category) {
                 if (category == null)
                         return "ai-images/placeholder.png";
