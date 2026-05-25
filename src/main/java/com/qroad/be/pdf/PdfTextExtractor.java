@@ -156,6 +156,7 @@ public class PdfTextExtractor extends PDFTextStripper {
         double maxX = -Double.MAX_VALUE;
         double maxY = -Double.MAX_VALUE;
         double maxFontSize = 0;
+        boolean isBold = false;
 
         for (PosEntry e : entries) {
             TextPosition tp = e.tp;
@@ -175,9 +176,21 @@ public class PdfTextExtractor extends PDFTextStripper {
             maxFontSize = Math.max(maxFontSize, fontSize);
 
             allFontSizes.add((double) fontSize);
+
+            if (!isBold) {
+                try {
+                    String fontName = tp.getFont().getName();
+                    if (fontName != null) {
+                        String fn = fontName.toLowerCase();
+                        isBold = fn.contains("bold") || fn.contains("heavy")
+                                || fn.contains("black") || fn.contains("굵");
+                    }
+                } catch (Exception ignored) {
+                }
+            }
         }
 
-        rawLines.add(new RawLine(text, minX, minY, maxX, maxY, maxFontSize));
+        rawLines.add(new RawLine(text, minX, minY, maxX, maxY, maxFontSize, isBold));
     }
 
     private void resetLine() {
@@ -205,7 +218,7 @@ public class PdfTextExtractor extends PDFTextStripper {
 
         List<Line> lines = new ArrayList<>();
         for (RawLine rl : stripper.rawLines) {
-            lines.add(new Line(rl.text, new double[] { rl.minX, rl.minY, rl.maxX, rl.maxY }, rl.maxFontSize));
+            lines.add(new Line(rl.text, new double[] { rl.minX, rl.minY, rl.maxX, rl.maxY }, rl.maxFontSize, rl.isBold));
         }
         // Sort top-to-bottom, left-to-right
         lines.sort(Comparator.comparingDouble(Line::getY0).thenComparingDouble(Line::getX0));
@@ -238,14 +251,16 @@ public class PdfTextExtractor extends PDFTextStripper {
     private static class RawLine {
         final String text;
         final double minX, minY, maxX, maxY, maxFontSize;
+        final boolean isBold;
 
-        RawLine(String text, double minX, double minY, double maxX, double maxY, double maxFontSize) {
+        RawLine(String text, double minX, double minY, double maxX, double maxY, double maxFontSize, boolean isBold) {
             this.text = text;
             this.minX = minX;
             this.minY = minY;
             this.maxX = maxX;
             this.maxY = maxY;
             this.maxFontSize = maxFontSize;
+            this.isBold = isBold;
         }
     }
 
