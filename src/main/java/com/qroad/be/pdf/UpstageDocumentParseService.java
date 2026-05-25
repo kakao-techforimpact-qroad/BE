@@ -134,9 +134,13 @@ public class UpstageDocumentParseService {
             return articles;
         }
 
-        // 각 제목별 본문 버퍼 초기화
-        List<StringBuilder> bodies = new ArrayList<>(titles.size());
-        for (int i = 0; i < titles.size(); i++) bodies.add(new StringBuilder());
+        // 각 제목별 본문 요소 수집 (좌표 포함 — 나중에 읽기 순서로 정렬)
+        List<List<double[]>> bodyCoords = new ArrayList<>(titles.size()); // [x, y]
+        List<List<String>> bodyTexts  = new ArrayList<>(titles.size());
+        for (int i = 0; i < titles.size(); i++) {
+            bodyCoords.add(new ArrayList<>());
+            bodyTexts.add(new ArrayList<>());
+        }
 
         // 3차 스캔: 각 본문 요소를 좌표 기준 가장 가까운 선행 제목에 귀속
         for (Map<String, Object> el : elements) {
@@ -156,12 +160,29 @@ public class UpstageDocumentParseService {
             double elX = b != null ? (b[0] + b[2]) / 2 : 0.5;
 
             int idx = findBestTitle(titles, page, elY, elX);
-            if (idx >= 0) bodies.get(idx).append(text).append("\n");
+            if (idx >= 0) {
+                bodyCoords.get(idx).add(new double[]{elX, elY});
+                bodyTexts.get(idx).add(text);
+            }
         }
 
-        // 기사 생성 (제목 정렬 순서 유지)
+        // 기사 생성: 본문 요소를 (x, y) 기준 읽기 순서로 정렬 후 이어붙임
         for (int i = 0; i < titles.size(); i++) {
-            saveArticle(articles, titles.get(i).text, bodies.get(i), titles.get(i).page);
+            List<String> texts = bodyTexts.get(i);
+            List<double[]> coords = bodyCoords.get(i);
+            Integer[] order = new Integer[texts.size()];
+            for (int j = 0; j < order.length; j++) order[j] = j;
+            Arrays.sort(order, (a, b2) -> {
+                double ax = coords.get(a)[0], bx = coords.get(b2)[0];
+                double ay = coords.get(a)[1], by = coords.get(b2)[1];
+                // 컬럼 버킷(0.20 단위)으로 x 구분 후 y 오름차순
+                int colA = (int)(ax / 0.20), colB = (int)(bx / 0.20);
+                if (colA != colB) return Integer.compare(colA, colB);
+                return Double.compare(ay, by);
+            });
+            StringBuilder sb = new StringBuilder();
+            for (int j : order) sb.append(texts.get(j)).append("\n");
+            saveArticle(articles, titles.get(i).text, sb, titles.get(i).page);
         }
 
         // 이어짐 기사 병합 후처리
@@ -306,7 +327,7 @@ public class UpstageDocumentParseService {
      * 서로 다른 기사 내용이 한 기사로 합쳐지는 현상 발생 → 같은 페이지 우선으로 해결.
      */
     private int findBestTitle(List<TitleEntry> titles, int page, double elY, double elX) {
-        final double ZONE = 0.25;
+        final double ZONE = 0.20;
 
         // 1단계: 같은 페이지, element 위에 있는 제목 중 ZONE 이내 + 최근접 y
         int samePageIdx = -1;
