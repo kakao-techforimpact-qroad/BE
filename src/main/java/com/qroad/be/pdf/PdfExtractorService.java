@@ -414,7 +414,7 @@ public class PdfExtractorService {
                 Math.max(ub[2], lb[2]),
                 Math.max(ub[3], lb[3])
         };
-        return new Line(text, bbox, Math.max(upper.getMaxSize(), lower.getMaxSize()));
+        return new Line(text, bbox, Math.max(upper.getMaxSize(), lower.getMaxSize()), upper.isBold() || lower.isBold());
     }
 
     private double nextTitleTopByAlignedX(List<Line> tlist, int currentIndex, double pageWidth, double defaultY) {
