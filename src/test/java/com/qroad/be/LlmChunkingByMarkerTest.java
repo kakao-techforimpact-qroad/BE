@@ -19,7 +19,10 @@ public class LlmChunkingByMarkerTest {
     @Test
     void chunkByArticleMarker_usesExtractedBlocks() throws Exception {
         byte[] pdfBytes = Files.readAllBytes(Paths.get("1825.pdf").toAbsolutePath());
-        PdfExtractorService extractor = new PdfExtractorService(new OcrService(), new UpstageDocumentParseService());
+        UpstageDocumentParseService upstage = new UpstageDocumentParseService();
+        String upstageKey = System.getenv("UPSTAGE_API_KEY");
+        if (upstageKey != null && !upstageKey.isEmpty()) upstage.setApiKey(upstageKey);
+        PdfExtractorService extractor = new PdfExtractorService(new OcrService(), upstage);
         String paperContent = extractor.extractWithImages(pdfBytes).getText();
 
         LlmService llmService = new LlmService(null);
