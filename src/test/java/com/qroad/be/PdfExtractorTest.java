@@ -14,47 +14,37 @@ public class PdfExtractorTest {
     @Test
     public void testExtraction() throws Exception {
         System.out.println("Starting PDF extraction test...");
-        com.qroad.be.pdf.UpstageDocumentParseService upstage =
-                new com.qroad.be.pdf.UpstageDocumentParseService();
-        String upstageKey = System.getenv("UPSTAGE_API_KEY");
-        if (upstageKey != null && !upstageKey.isEmpty()) {
-            upstage.setApiKey(upstageKey);
+        PdfExtractorService service = new PdfExtractorService(new OcrService());
+        Path pdfPath = Paths.get("1825.pdf").toAbsolutePath();
+        if (!Files.exists(pdfPath)) {
+            System.err.println("File not found: " + pdfPath);
+            return;
         }
-        PdfExtractorService service = new PdfExtractorService(new OcrService(), upstage);
 
-        String[] fileNames = {"TalkFile_1838", "TalkFile_1839", "TalkFile_1840", "TalkFile_1841"};
+        byte[] pdfBytes = Files.readAllBytes(pdfPath);
+        PdfExtractorService.ExtractionResult result = service.extractWithImages(pdfBytes);
+
         String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-        Path outputDir = Paths.get("/Users/kim-yusin/article/test_" + timestamp);
+        Path outputDir = Paths.get("build", "pdf-test-output", "test_" + timestamp).toAbsolutePath();
         Files.createDirectories(outputDir);
         System.out.println("Saving results to directory: " + outputDir);
 
+        Path textOut = outputDir.resolve("1825_extracted.txt");
+        Files.writeString(textOut, result.getText());
+        System.out.println("Saved text to: " + textOut);
 
-
-        for (String name : fileNames) {
-            Path pdfPath = Paths.get("/Users/kim-yusin/article/" + name + ".pdf");
-            if (!Files.exists(pdfPath)) {
-                System.err.println("File not found: " + pdfPath);
-                continue;
+        List<PdfExtractorService.ArticleImageData> images = result.getArticleImages();
+        System.out.println("Found " + images.size() + " images.");
+        int idx = 1;
+        for (PdfExtractorService.ArticleImageData img : images) {
+            String sanitizedTitle = img.getTitle().replaceAll("[\\\\/:*?\"<>|\\n\\r]", "_").trim();
+            if (sanitizedTitle.length() > 30) {
+                sanitizedTitle = sanitizedTitle.substring(0, 30);
             }
-            System.out.println("\n=== Processing: " + name + " ===");
-            byte[] pdfBytes = Files.readAllBytes(pdfPath);
-            PdfExtractorService.ExtractionResult result = service.extractWithImages(pdfBytes);
-
-            Path textOut = outputDir.resolve(name + "_extracted.txt");
-            Files.writeString(textOut, result.getText());
-            System.out.println("Saved text to: " + textOut);
-
-            List<PdfExtractorService.ArticleImageData> images = result.getArticleImages();
-            System.out.println("Found " + images.size() + " images.");
-            int idx = 1;
-            for (PdfExtractorService.ArticleImageData img : images) {
-                String sanitizedTitle = img.getTitle().replaceAll("[\\\\/:*?\"<>|\\n\\r]", "_").trim();
-                if (sanitizedTitle.length() > 30) sanitizedTitle = sanitizedTitle.substring(0, 30);
-                Path imgPath = outputDir.resolve(name + "_image_" + idx + "_" + sanitizedTitle + ".jpg");
-                Files.write(imgPath, img.getImageBytes());
-                idx++;
-            }
+            Path imgPath = outputDir.resolve("1825_image_" + idx + "_" + sanitizedTitle + ".jpg");
+            Files.write(imgPath, img.getImageBytes());
+            idx++;
         }
-        System.out.println("\nDone extracting all PDFs.");
+        System.out.println("Done extracting PDF.");
     }
 }
