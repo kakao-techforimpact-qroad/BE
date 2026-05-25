@@ -3,6 +3,7 @@ package com.qroad.be;
 import com.qroad.be.external.llm.LlmService;
 import com.qroad.be.pdf.OcrService;
 import com.qroad.be.pdf.PdfExtractorService;
+import com.qroad.be.pdf.UpstageDocumentParseService;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -18,7 +19,7 @@ public class LlmChunkingByMarkerTest {
     @Test
     void chunkByArticleMarker_usesExtractedBlocks() throws Exception {
         byte[] pdfBytes = Files.readAllBytes(Paths.get("1825.pdf").toAbsolutePath());
-        PdfExtractorService extractor = new PdfExtractorService(new OcrService());
+        PdfExtractorService extractor = new PdfExtractorService(new OcrService(), new UpstageDocumentParseService());
         String paperContent = extractor.extractWithImages(pdfBytes).getText();
 
         LlmService llmService = new LlmService(null);

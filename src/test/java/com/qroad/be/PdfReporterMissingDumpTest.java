@@ -2,6 +2,7 @@ package com.qroad.be;
 
 import com.qroad.be.pdf.OcrService;
 import com.qroad.be.pdf.PdfExtractorService;
+import com.qroad.be.pdf.UpstageDocumentParseService;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -11,7 +12,7 @@ import java.util.Arrays;
 public class PdfReporterMissingDumpTest {
     @Test
     void dumpSplitSuspiciousTitles() throws Exception {
-        PdfExtractorService service = new PdfExtractorService(new OcrService());
+        PdfExtractorService service = new PdfExtractorService(new OcrService(), new UpstageDocumentParseService());
         byte[] pdfBytes = Files.readAllBytes(Paths.get("1825.pdf").toAbsolutePath());
         PdfExtractorService.ExtractionResult result = service.extractWithImages(pdfBytes);
         String text = result.getText();
