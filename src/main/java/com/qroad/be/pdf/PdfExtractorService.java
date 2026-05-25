@@ -57,8 +57,19 @@ public class PdfExtractorService {
     private static final Pattern CONTINUATION_PATTERN = Pattern.compile("기사\\s*(\\d+)\\s*면\\s*이어짐");
     private static final Pattern CONTINUED_FROM_PATTERN = Pattern.compile("^(\\d+)면(에서)?\\s*이어[짐서]");
 
-    // OCR 텍스트 내 전화번호 형태 매칭 (예: 000-0000-0000, 043-000-0000, 043)000-0000)
-    private static final Pattern PHONE_PATTERN = Pattern.compile("\\d{2,3}\\s*[-)]\\s*\\d{3,4}\\s*-\\s*\\d{4}");
+    private static final Pattern PHONE_PATTERN = Pattern.compile(
+            "\\(?\\d{2,3}\\)?[-.]\\d{3,4}[-.]\\d{4}");
+    private static final Pattern URL_PATTERN = Pattern.compile(
+            "(?i)www\\.|http[s]?://");
+    private static final Pattern AD_EXCLUSIVE_KEYWORD = Pattern.compile(
+            "선\\s*착\\s*순|분\\s*양\\s*안\\s*내|입\\s*주\\s*문\\s*의|할\\s*인\\s*이\\s*벤\\s*트|모\\s*집\\s*공\\s*고|대표\\s*번호");
+    private static final Pattern EXPLICIT_AD_MARKER = Pattern.compile(
+            "(?i)\\[광고]|\\(광고\\)|\\[PR]|\\[홍보]|\\[협찬]|\\(협찬\\)|광고문의|협찬문의");
+    private static final Pattern PRICE_PATTERN = Pattern.compile(
+            "\\d+\\s*만\\s*원|\\d+[,\\d]*\\s*원\\s*[(/]|\\d+\\.?\\d*\\s*%\\s*할인");
+    private static final Pattern PUBLIC_NOTICE_PATTERN = Pattern.compile(
+            "입\\s*찰\\s*공\\s*고|채\\s*용\\s*공\\s*고|공\\s*개\\s*모\\s*집|" +
+            "지\\s*원\\s*자\\s*격|접\\s*수\\s*기\\s*간|제\\s*출\\s*서\\s*류|응\\s*시\\s*자\\s*격");
 
     // ──────────────────────── public entry point ────────────────────────
 
@@ -204,6 +215,26 @@ public class PdfExtractorService {
 
         public String getTitle() { return title; }
         public byte[] getImageBytes() { return imageBytes; }
+    }
+
+    // ──────────────────────── ad detection ────────────────────────
+
+    private boolean isLikelyAd(String body) {
+        if (EXPLICIT_AD_MARKER.matcher(body).find()) return true;
+
+        int score = 0;
+        if (PHONE_PATTERN.matcher(body).find())        score += 2;
+        if (URL_PATTERN.matcher(body).find())          score += 2;
+        if (AD_EXCLUSIVE_KEYWORD.matcher(body).find()) score += 3;
+        if (PUBLIC_NOTICE_PATTERN.matcher(body).find()) score += 2;
+
+        long priceMatches = PRICE_PATTERN.matcher(body).results().count();
+        if (priceMatches >= 2) score += 2;
+
+        long adKwCount = AD_KEYWORDS.stream().filter(body::contains).count();
+        if (adKwCount >= 3) score += 1;
+
+        return score >= 4;
     }
 
     // ──────────────────────── title detection ────────────────────────
