@@ -50,6 +50,7 @@ DB_USERNAME=
 DB_PASSWORD=
 
 OPENAI_API_KEY=
+UPSTAGE_API_KEY=
 
 AWS_S3_BUCKET=
 AWS_REGION=
@@ -61,6 +62,7 @@ JWT_SECRET=
 참고:
 - `JWT_SECRET`은 HS256 기준 최소 32바이트 이상이어야 합니다.
 - 비밀값은 `.env`, Secret Manager, CI/CD Secret, 서버 환경 변수로만 관리하세요.
+- 운영 배포에서는 앱 비밀값을 서버의 `/opt/qroad/.env`에서 관리합니다.
 
 ## 5. 로컬 DB 실행 (Docker)
 

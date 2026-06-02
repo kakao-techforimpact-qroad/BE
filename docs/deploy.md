@@ -21,7 +21,7 @@
    - login to GHCR
    - commit tag image pull first
    - if commit tag pull fails, fallback to `latest`
-   - `docker compose up -d app`
+   - `docker compose up -d app` using app secrets from `/opt/qroad/.env`
    - health check (`/actuator/health` by default)
    - if health check fails, rollback to previous image
 7. Runner IP is revoked from security group (`if: always()`).
@@ -32,23 +32,31 @@
 - Server does not build artifacts anymore; image is built once in CI and pulled in deployment.
 - Server does not require git clone for deployment.
 
-## Required Secrets
+## GitHub Secrets
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SECURITY_GROUP_ID`
 - `SSH_PRIVATE_KEY`
 - `GHCR_USERNAME`
 - `GHCR_TOKEN` (PAT with `read:packages`)
+- `DEPLOY_HOST` (example: `api.example.com`)
+
+## Server `.env`
+Store this file at `/opt/qroad/.env` on the target server. These values are read by Docker Compose and passed to the app container.
+
 - `DB_URL`
 - `DB_USERNAME`
 - `DB_PASSWORD`
 - `OPENAI_API_KEY`
+- `UPSTAGE_API_KEY`
 - `AWS_S3_BUCKET`
 - `AWS_REGION`
 - `AWS_S3_PRESIGN_EXP_MINUTES`
 - `JWT_SECRET`
-- `DEPLOY_HOST` (example: `api.example.com`)
+- `NEWS_LOGIN_ID`
+- `NEWS_LOGIN_PASSWORD`
 - `CORS_ALLOWED_ORIGINS` (comma-separated origins)
+- `SPRING_AUTOCONFIGURE_EXCLUDE`
 
 ## Failure Handling
 - If a step fails, workflow stops and reports failure in GitHub Actions.
@@ -80,11 +88,13 @@ chmod +x deploy.sh
 
 Important:
 - Manual deployment requires required environment variables to be exported in the shell before running.
-- The workflow exports these automatically during CI/CD, but manual shell does not.
+- The application secrets now come from `/opt/qroad/.env`.
+- The workflow only provides deployment/runtime values such as image URI and registry credentials.
 
 ## Quick Verification
 ```bash
 docker compose -f /opt/qroad/docker-compose.prod.yml ps
+docker compose -f /opt/qroad/docker-compose.prod.yml config
 curl -fsS http://localhost:8080/actuator/health
 ls -al ~/log/qroad-be
 ```

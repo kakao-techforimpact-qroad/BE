@@ -1,0 +1,113 @@
+================================================================
+Qroad 신문 PDF → 기사 발행 파이프라인 개선 프로젝트
+하이브리드 레이아웃 파싱 아키텍처 상세 스펙 (Claude용)
+================================================================
+
+작성일: 2026년 4월
+목적: 기존 PDFBox 규칙 기반의 문제점(기사 잘림, 기자명 누락, 랩 레이아웃, continued 병합 실패)을 해결하고,
+      LLM(GPT-4o-mini) 입력 품질을 극대화하여 최종 기사 발행 정확도를 높인다.
+
+### 1. 현재 시스템의 핵심 문제점
+1. 기사 잘림 (Truncation)
+   - buildArticlesForPage()에서 중심점(cx, cy) 기반 라인 할당
+   - 컬럼을 넘나들거나 랩(wrapping) 레이아웃에서 본문이 중간에 잘림
+
+2. 기자명(Byline) 인식 실패
+   - isProbableTitle()이 폰트 크기와 bold 여부만 판단
+   - 제목 직하단 작은 폰트의 "김기연 기자", "양유경 기자", "kite@okienws.com" 등이 누락되거나 본문 끝에 오염
+
+3. 칼럼 변경 시 다른 기사로 오인 + 랩 레이아웃 문제
+   - inferColumnSplits()가 제목 x0 좌표만으로 컬럼 분리
+   - 넓은 기사가 여러 컬럼을 감쌀 때 인접 기사 텍스트가 섞임
+
+4. Continued 기사 병합 미완성
+   - "▷ N면 이어짐", "▶ 기사 X면 이어짐" 패턴은 감지하지만 실제 본문 병합 로직이 불완전
+   - 결과적으로 기사 1에 기사 2의 내용이 뒤섞여서 추출됨
+
+→ serializedArticles 텍스트가 messy하여 LLM 요약·분석 품질 저하
+
+### 2. 제안 아키텍처: Hybrid Layout Parsing
+
+기본 원칙
+- 대부분의 페이지 → 기존 PDFBox 규칙 기반 유지 (속도 및 비용 최적화)
+- 문제 페이지만 → Upstage Document Parse API로 재처리 (한국어 신문 레이아웃에 최적화)
+
+문제 페이지 판별 기준
+- continued 마커 존재 ("▷ N면 이어짐", "▶ 기사 X면 이어짐")
+- 검출된 기사 개수가 30개 이상 (소제목 오탐지)
+- 랩 레이아웃 의심 (제목 너비 > 페이지 너비 * 0.6)
+- 컬럼 간 텍스트 오염 의심
+
+### 3. 전체 파이프라인 흐름
+
+1. PDF 업로드
+2. PDFBox 1차 추출 (텍스트 + 좌표 + 폰트 정보)
+3. 문제 페이지 판단
+   - 정상 페이지 → 기존 직렬화 로직 사용
+   - 문제 페이지 → Upstage Document Parse API 호출
+4. Upstage 결과 또는 PDFBox 결과를 Article 객체로 통합
+5. 후처리
+   - 기자명(Byline) 자동 추출
+   - Continued 기사 병합
+   - 읽는 순서(read-order) 보정
+6. LLM 입력용 Serialize (title, byline, body 명확히 구분)
+7. GPT-4o-mini 호출 (요약, 기자, 키워드, 카테고리)
+8. 비기사 필터링 및 DB 저장
+
+### 4. Upstage Document Parse API 호출 스펙
+
+엔드포인트: POST https://api.upstage.ai/v1/document-parse
+권장 파라미터:
+- document: PDF Base64 또는 S3 Presigned URL
+- output_format: "html" (추천) 또는 "markdown"
+- mode: "enhanced" (복잡 레이아웃 처리 강화)
+- language: "ko"
+
+### 5. 후처리 요구사항 (Post-processing)
+
+1. 기자명 추출
+   - 정규식 패턴: ".*?(김기연|양유경|황민호|유일하|유지인).*?(기자|@okienws.com)"
+   - HTML 내 특정 태그/클래스에서 byline 탐지
+
+2. Continued 기사 병합
+   - "이어짐" 마커를 기준으로 Article 객체 병합
+   - Upstage가 제공하는 reading order 활용
+
+3. 최종 Article 구조
+   - title: String
+   - byline: String          ← 반드시 별도 필드
+   - body: String
+   - images: List<String>
+   - pageRange: String
+   - isContinued: boolean
+
+### 6. 구현 우선순위
+
+Phase 1 (최우선)
+- Upstage API 호출 메서드 구현
+- 문제 페이지 판별 로직 (isProblematicPage)
+- PDFBox 결과와 Upstage 결과를 통합하는 서비스
+
+Phase 2
+- 기자명 자동 추출 로직
+- Continued 기사 병합 강화
+- Article DTO 및 Serialize 로직 수정
+
+Phase 3
+- A/B 테스트 프레임워크 구축
+- 성능 지표 측정 (기사 잘림률, 기자명 인식률, LLM 요약 정확도)
+
+### 7. 기대 효과
+- 기사 잘림률: 기존 25~35% → 목표 5% 이하
+- 기자명 인식률: 기존 ~30% → 목표 90% 이상
+- LLM 입력 품질 대폭 향상 → 요약·카테고리 정확도 20~30% 상승
+- 전체 처리 속도 영향 최소화 (문제 페이지만 Upstage 사용)
+
+추가 요구사항
+- 기존 PDFBox 코드 최대한 재사용
+- Java + Spring Boot 환경 유지
+- Upstage API 키는 환경변수로 관리
+- 에러 발생 시 fallback으로 기존 PDFBox 결과 사용
+
+이 스펙에 따라 하이브리드 파이프라인을 설계하고 구현해 주세요.
+필요한 경우 Phase 1부터 단계별로 코드 작성 요청하겠습니다.
