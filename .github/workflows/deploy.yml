@@ -144,6 +144,7 @@ jobs:
             export DB_USERNAME='${{ secrets.DB_USERNAME }}' &&
             export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' &&
             export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' &&
+            export UPSTAGE_API_KEY='${{ secrets.UPSTAGE_API_KEY }}' &&
             export AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' &&
             export AWS_REGION='${{ secrets.AWS_REGION }}' &&
             export AWS_S3_PRESIGN_EXP_MINUTES='${{ secrets.AWS_S3_PRESIGN_EXP_MINUTES }}' &&
